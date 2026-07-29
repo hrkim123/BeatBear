@@ -8,6 +8,7 @@ const SERVER_VERSION = process.env.SERVER_VERSION || (() => { try { return requi
 
 const wss = new WebSocketServer({ port: PORT })
 const rooms = new Map() // code -> Map<id, { ws, name, animal }>
+const hostOf = new Map() // code -> host id (방에 처음 접속한 사람 = 호스트, IP 무관 · 강퇴/무기잠금 권한)
 
 let nextId = 1
 
@@ -68,7 +69,8 @@ wss.on('connection', (ws, req) => {
         mouse: String(msg.mouse || 'white').slice(0, 12)
       })
       joinedRoom = code
-      ws.send(JSON.stringify({ t: 'joined', id, room: code, max: MAX_ROOM_SIZE, host: isHost }))
+      if (!hostOf.has(code) || !room.has(hostOf.get(code))) hostOf.set(code, id)   // 유효한 호스트 없으면 이 접속자가 호스트
+      ws.send(JSON.stringify({ t: 'joined', id, room: code, max: MAX_ROOM_SIZE, host: hostOf.get(code) === id }))
       broadcast(code, { t: 'roster', peers: roster(code) })
       console.log(`[room ${code}] +${id} (${room.size} in room)`)
       return
@@ -145,10 +147,10 @@ wss.on('connection', (ws, req) => {
       broadcast(joinedRoom, { t: 'setcur', id, target: msg.target, count: msg.count, gems: msg.gems, mat: msg.mat }, id)   // dev set a user's currency
     } else if (msg.t === 'peace') {
       broadcast(joinedRoom, { t: 'peace', id, on: msg.on }, id)   // dev toggled peace mode (weapons locked for all)
-    } else if (msg.t === 'kick' && isHost) {   // 호스트: 특정 유저 강퇴(연결 종료 → close 핸들러가 roster 자동 갱신)
+    } else if (msg.t === 'kick' && hostOf.get(joinedRoom) === id) {   // 호스트: 특정 유저 강퇴(연결 종료 → close 핸들러가 roster 자동 갱신)
       const rk = rooms.get(joinedRoom); const tgt = rk && rk.get(msg.target)
       if (tgt) { try { tgt.ws.send(JSON.stringify({ t: 'kicked' })) } catch {} ; try { tgt.ws.close() } catch {} ; console.log(`[kick] host ${id} -> ${msg.target}`) }
-    } else if (msg.t === 'wlock' && isHost) {   // 호스트: 특정 유저 무기·소환체 사용 잠금(타깃만 적용)
+    } else if (msg.t === 'wlock' && hostOf.get(joinedRoom) === id) {   // 호스트: 특정 유저 무기·소환체 사용 잠금(타깃만 적용)
       broadcast(joinedRoom, { t: 'wlock', id, target: msg.target, on: msg.on }, id)
     } else if (msg.t === 'hbullets' && Array.isArray(msg.list)) {
       broadcast(joinedRoom, { t: 'hbullets', id, list: msg.list.slice(0, 30) }, id)
@@ -238,8 +240,13 @@ wss.on('connection', (ws, req) => {
     const room = rooms.get(joinedRoom)
     if (!room) return
     room.delete(id)
+    if (hostOf.get(joinedRoom) === id) {   // 호스트가 나감 → 남은 최고참에게 호스트 이양(알림)
+      const next = room.size ? [...room.keys()][0] : null
+      if (next != null) { hostOf.set(joinedRoom, next); const nm = room.get(next); if (nm) { try { nm.ws.send(JSON.stringify({ t: 'host', on: 1 })) } catch {} } }
+      else hostOf.delete(joinedRoom)
+    }
     console.log(`[room ${joinedRoom}] -${id} (${room.size} in room)`)
-    if (room.size === 0) rooms.delete(joinedRoom)
+    if (room.size === 0) { rooms.delete(joinedRoom); hostOf.delete(joinedRoom) }
     else broadcast(joinedRoom, { t: 'roster', peers: roster(joinedRoom) })
   })
 })

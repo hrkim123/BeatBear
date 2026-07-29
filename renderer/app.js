@@ -579,6 +579,10 @@
   // recent changelog entry (the version just received) — skipped in-between notes are not shown.
   // Add newest versions at the TOP.
   const CHANGELOG = {
+    '0.1.3': [
+      '👑 호스트 강퇴 수정 — 접속 방식과 무관하게 확실히 작동(방에 처음 접속한 사람=호스트)',
+      '🎲 배틀 베팅 재화 정리 — 무배팅 / 🐾 파우 코인 / 💎 그리즐 코인',
+    ],
     '0.1.2': [
       '🐻 BeatBear 첫 릴리스 — 곰 캐릭터로 새 출발',
       '🧭 햄버거 메뉴 대개편 — 꾸미기·소환·컬렉션·미니게임·편의성·설정 팝업',
@@ -862,7 +866,7 @@
       if (msg.t === 'joined') {
         me.netId = msg.id; roomMax = msg.max || 12; setStatus('서버 접속됨')
         // the SERVER decides host (loopback client) — persist it so all weapons stay unlocked
-        if (msg.host && !isHost) { isHost = true; localStorage.setItem('host', '1'); pushState() }
+        isHost = !!msg.host; localStorage.setItem('host', isHost ? '1' : '0'); pushState()   // 서버 권위값으로 동기화(호스트 박제 방지 → kick/wlock 신뢰성)
         setTimeout(resolveMyOverlap, 900)   // 기존 인원 위치가 도착한 뒤 내 프리셋 겹침 해소
       }
       else if (msg.t === 'roster') {
@@ -949,6 +953,7 @@
       else if (msg.t === 'peace') { setPeace(!!msg.on, true) }    // dev toggled peace mode → lock/unlock weapons for me too
       else if (msg.t === 'wlock') { if (msg.target === me.netId) { hostWlock = !!msg.on; if (hostWlock) clearMySummons(); showToast(hostWlock ? '🚫 호스트가 내 무기·소환체 사용을 잠갔어요' : '✅ 무기·소환체 잠금 해제') } }   // 호스트 per-user 잠금(나만 적용)
       else if (msg.t === 'kicked') { showToast('⛔ 호스트에 의해 강퇴되었습니다'); disconnect(); setStatus('강퇴됨 — 오프라인') }   // 서버가 내 연결을 닫기 직전 통지
+      else if (msg.t === 'host') { isHost = !!msg.on; localStorage.setItem('host', isHost ? '1' : '0'); if (isHost) showToast('👑 호스트 권한을 받았어요'); pushState(); if (window.HGMenu && window.HGMenu.isOpen()) window.HGMenu.refresh() }   // 호스트 이양(전 호스트 이탈) 통지
       // ── 멀티 배틀 ── (to === me.netId 만 처리)
       else if (msg.t === 'battle-req') { if (msg.to === me.netId && !battleActive && !battleIncoming && !battleAwaitingGo) { const p = peers.get(msg.id); showBattleInvitePopup(msg.id, (p && p.name) || '상대', msg.bet || null) } else if (msg.to === me.netId && connected()) net.send(JSON.stringify({ t: 'battle-dec', to: msg.id, reason: 'busy' })) }
       else if (msg.t === 'battle-acc') {   // 상대가 내 신청 수락 → 내가 아직 가능하면 확답(battle-go) 후 시작(side0), 아니면 busy 회신(상대 유령 배틀 방지)
@@ -3801,14 +3806,13 @@
   let battleMulti = null, battleInvite = null, battleIncoming = null, battleFlip = false, battleAwaitingGo = null, battleAwaitTimer = null   // battleAwaitingGo=내가 수락 후 신청자 확답(battle-go) 대기중(유령 배틀 방지 핸드셰이크)
   let battleBet = null, battleBetSettled = false   // 베팅: {cur:'count'|'gems'|'mat', amt}. 진입 시 escrow 차감, 결과 시 1회 정산.
   let battleBetResult = null   // 결과창 표시용: {cur, amt, win, bal(정산 후 보유량)}
-  const BET_CUR = { count: { name: '카운트', emoji: '🪙' }, gems: { name: '젬', emoji: '💎' }, mat: { name: '강화 부품', emoji: '🔩' } }
-  function betBalance(cur) { return cur === 'count' ? tapCount : cur === 'gems' ? (window.BattleGacha ? window.BattleGacha.getGems() : 0) : cur === 'mat' ? (window.BattleGacha ? window.BattleGacha.getMaterials() : 0) : 0 }
-  function betAdd(cur, n) {   // n 음수=차감. 카운트=tapCount, 젬/부품=BattleGacha.
-    if (cur === 'count') { tapCount = Math.max(0, tapCount + n); counterDirty = true; renderCounter() }
-    else if (cur === 'gems' && window.BattleGacha) window.BattleGacha.addGems(n)
-    else if (cur === 'mat' && window.BattleGacha) window.BattleGacha.addMaterials(n)
+  const BET_CUR = { paw: { name: '파우 코인', emoji: '🐾' }, grizzle: { name: '그리즐 코인', emoji: '💎' } }
+  function betBalance(cur) { return cur === 'paw' ? pawCoin : cur === 'grizzle' ? (window.BattleGacha ? window.BattleGacha.getGems() : 0) : 0 }
+  function betAdd(cur, n) {   // n 음수=차감. 파우=pawCoin, 그리즐=BattleGacha gems.
+    if (cur === 'paw') addPawCoin(n)
+    else if (cur === 'grizzle' && window.BattleGacha) window.BattleGacha.addGems(n)
   }
-  function betLabel(bet) { const c = BET_CUR[bet.cur] || {}; return `${c.emoji || ''} ${bet.amt} ${c.name || ''}` }
+  function betLabel(bet) { const c = BET_CUR[bet.cur] || {}; return `${c.emoji || ''} ${bet.amt}` }   // 아이콘 + 금액(이름 생략)
   function settleBattleBet(win) {   // 결과 1회 정산: 승=팟(2×) 수령(순 +amt), 패=escrow 유지(순 -amt)
     if (!battleBet || battleBetSettled) return
     battleBetSettled = true
@@ -4061,7 +4065,7 @@
     const card = document.createElement('div')
     card.style.cssText = 'background:linear-gradient(180deg,#1a1f28,#12151b);border:1px solid #39414f;border-radius:14px;padding:18px 20px;width:min(340px,90vw);box-shadow:0 18px 50px rgba(0,0,0,.6);color:#e8ebf0'
     let cur = 'none'
-    const curs = [['none', '무베팅', '—'], ['count', '🪙 카운트', betBalance('count')], ['gems', '💎 젬', betBalance('gems')], ['mat', '🔩 부품', betBalance('mat')]]
+    const curs = [['none', '무배팅'], ['paw', '🐾'], ['grizzle', '💎']]   // 무배팅 / 파우(아이콘만) / 그리즐(아이콘만)
     card.innerHTML = `<div style="font-size:15px;font-weight:700;margin-bottom:4px">⚔ ${p.name || '상대'} 에게 배틀 신청</div>
       <div style="font-size:12px;color:#8fa0b4;margin-bottom:12px">베팅 재화와 금액 선택 (지면 잃고, 이기면 2배)</div>
       <div class="betcurs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
