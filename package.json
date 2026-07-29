@@ -1,0 +1,64 @@
+{
+  "name": "beatbear",
+  "productName": "BeatBear",
+  "version": "0.1.0",
+  "description": "BeatBear — a full-screen desktop overlay where a cute bear taps along with your keyboard and mouse, with multiplayer rooms and cursor-homing missiles",
+  "main": "main.js",
+  "author": "hrkim",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server/server.js",
+    "server:exe": "pkg server/launcher.js --targets node22-win-x64 --output dist-server/beatbear-server.exe",
+    "dist": "electron-builder",
+    "release": "electron-builder --publish always",
+    "ship:patch": "npm version patch && git push --follow-tags",
+    "ship:minor": "npm version minor && git push --follow-tags",
+    "ship:major": "npm version major && git push --follow-tags"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.3.0",
+    "electron": "^35.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "pkg": {
+    "assets": [
+      "server/server.js",
+      "package.json"
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "uiohook-napi": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+  "build": {
+    "appId": "com.hrkim.beatbear",
+    "productName": "BeatBear",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "!server/**",
+      "!**/*.md"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "BeatBear"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "hrkim123",
+        "repo": "BeatBear",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

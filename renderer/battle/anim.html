@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>소환체 애니메이션 미리보기 (dev)</title>
+<style>
+  body{margin:0;background:#0f1218;color:#e8ebf0;font-family:system-ui,'맑은 고딕',sans-serif;padding:16px}
+  h1{font-size:15px}
+  .cap{font-size:12px;color:#9aa0ab;margin:8px 0 4px}
+  canvas{background:#1b1d22;border:1px solid #2b2f39;border-radius:8px;display:block}
+</style>
+</head>
+<body>
+  <h1>🐜 신규 소환체 애니메이션 미리보기</h1>
+  <div class="cap">각 유닛 걷기(2프레임)·공격·피격·사망</div>
+  <canvas id="grid" width="700" height="640"></canvas>
+
+  <script src="sprites.js"></script>
+  <script>
+    const UNITS = [
+      ['rifleman', '라이플 솔저'], ['grenadier', '수류탄 솔저'], ['shielder', '쉴더'],
+      ['scout', '정찰 개미'], ['kamikaze', '카미카제'], ['medic', '메딕'],
+    ];
+    const STATES = [['걷기', 'walk', 0.05], ['걷기2', 'walk', 0.25], ['공격', 'attack', 0.05, true], ['피격', 'hit', 0], ['사망', 'death', 0, 0.6]];
+    const g = document.getElementById('grid'), gc = g.getContext('2d');
+    const rowH = 100, colW = 130, x0 = 110, y0 = 40;
+    function render() {
+      gc.clearRect(0, 0, g.width, g.height);
+      gc.font = '11px system-ui'; gc.textAlign = 'left';
+      STATES.forEach((s, si) => { gc.fillStyle = '#9aa0ab'; gc.fillText(s[0], x0 + si * colW + 44, 24); });
+      UNITS.forEach((u, ui) => {
+        const cy = y0 + ui * rowH + 74;
+        gc.fillStyle = '#cfd4de'; gc.textAlign = 'left'; gc.fillText(u[1], 6, cy - 30);
+        STATES.forEach((s, si) => {
+          const cx = x0 + si * colW + 44;
+          gc.strokeStyle = 'rgba(255,255,255,.10)'; gc.beginPath(); gc.moveTo(cx - 30, cy); gc.lineTo(cx + 40, cy); gc.stroke();
+          BattleSprites.draw(gc, u[0], { x: cx, y: cy, scale: 1.9, facing: 1, state: s[1], t: s[2], flash: s[3], deathT: s[4] });
+        });
+      });
+    }
+    render();
+    window.__probe = () => UNITS.map((u, ui) => {
+      const cy = y0 + ui * rowH + 74, cx = x0 + 44;
+      const d = gc.getImageData(cx - 28, cy - 60, 68, 62).data; let n = 0;
+      for (let p = 3; p < d.length; p += 4) if (d[p] > 10) n++;
+      return { unit: u[0], drawnPixels: n };
+    });
+  </script>
+</body>
+</html>
