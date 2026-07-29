@@ -368,14 +368,7 @@
   function drawHeadSkin(ctx, design, cx, hy, pal, f) {
     if (design !== 'panda') return
     const BK = '#232227', eyeY = hy - 2 + ((f && f.eyeDY) || 0), edx = (f && f.eyeDX) || 0
-    // 검은 귀 — 머리 실루엣 "밖"(=귀)에만 검게 칠해 얼굴로 번지지 않게(evenodd 클립)
-    ctx.save()
-    ctx.beginPath(); ctx.rect(cx - 100, hy - 100, 200, 200); ctx.ellipse(cx, hy, 50, 44, 0, 0, Math.PI * 2); ctx.clip('evenodd')
-    for (const s of [-1, 1]) {
-      ctx.fillStyle = BK; ctx.beginPath(); ctx.arc(cx + s * 32, hy - 34, 17, 0, Math.PI * 2); ctx.fill()
-      ctx.fillStyle = '#3d3c44'; ctx.beginPath(); ctx.arc(cx + s * 32, hy - 37, 7.5, 0, Math.PI * 2); ctx.fill()
-    }
-    ctx.restore()
+    // (귀는 스킨이 직접 그리지 않음 — 귀 디자인은 별도 '귀' 꾸미기 담당. 판다는 귀 "색"만 검게: 귀 렌더에서 shp.body==='panda' 처리)
     // 검은 눈 무늬 — 큰 세로 타원이 위(바깥)는 눈을 감싸고 아래(안쪽=코쪽)로 기움(만화 판다). 눈은 패치 윗부분.
     for (const s of [-1, 1]) {
       const ex = cx + s * (15 + edx)
@@ -439,18 +432,28 @@
     if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] = lines[maxLines - 1].replace(/.{2}$/, '') + '…' }
     return lines
   }
-  function drawBubble(ctx, text, cx, headTopY, now, until) {
+  function drawBubble(ctx, text, cx, headTopY, now, until, clamp) {
     const alpha = Math.max(0, Math.min(1, (until - now) / 400))
     ctx.save(); ctx.globalAlpha = alpha
-    ctx.font = '600 32px "Segoe UI", "Malgun Gothic", sans-serif'   // 2배 크게
-    const lines = wrapText(ctx, text, 380, 2); const lineH = 40
+    ctx.font = '600 28px "Segoe UI", "Malgun Gothic", sans-serif'   // 살짝 축소(32→28)
+    const lines = wrapText(ctx, text, 380, 2); const lineH = 36
     const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 52
-    const h = lines.length * lineH + 28
-    const x = cx - w / 2; const y = headTopY - h - 28  // 머리 위 중앙
+    const h = lines.length * lineH + 26
+    let x = cx - w / 2; let y = headTopY - h - 28  // 머리 위 중앙
+    // 화면 끝 프리셋에서 말풍선이 오버레이 밖으로 나가지 않게 셀-로컬 좌표를 뷰포트 안으로 클램프.
+    // clamp={sx,sy,sc,vw,vh}: 셀 화면좌표(sx,sy)·스케일(sc)·뷰포트(vw,vh). 화면좌표 = s* + local*sc.
+    if (clamp && clamp.sc) {
+      const M = 8
+      const loX = (M - clamp.sx) / clamp.sc, hiX = (clamp.vw - M - clamp.sx) / clamp.sc - w
+      if (hiX >= loX) x = Math.max(loX, Math.min(hiX, x))
+      const loY = (M - clamp.sy) / clamp.sc
+      if (y < loY) y = loY   // 위로 넘치면 아래로(캐릭터는 하단 고정이라 대개 가로만 문제)
+    }
     ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(60,55,70,0.25)'; ctx.lineWidth = 2
     rr(ctx, x, y, w, h, 24); ctx.fill(); ctx.stroke()
     const tailTip = Math.min(headTopY - 2, y + h + 20)
-    ctx.beginPath(); ctx.moveTo(cx - 16, y + h - 1); ctx.lineTo(cx, tailTip); ctx.lineTo(cx + 16, y + h - 1); ctx.closePath(); ctx.fill()
+    const tb = Math.max(x + 18, Math.min(x + w - 18, cx))   // 꼬리 밑변은 상자 아래에 붙임(클램프로 상자가 이동해도 분리 안 됨), 끝은 캐릭터(cx)를 가리킴
+    ctx.beginPath(); ctx.moveTo(tb - 16, y + h - 1); ctx.lineTo(cx, tailTip); ctx.lineTo(tb + 16, y + h - 1); ctx.closePath(); ctx.fill()
     ctx.fillStyle = '#33313a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
     const cyB = y + h / 2  // vertically center the text block inside the bubble
     lines.forEach((l, i) => ctx.fillText(l, x + w / 2, cyB + (i - (lines.length - 1) / 2) * lineH))
@@ -580,20 +583,23 @@
     // head group
     ctx.save()
     // ears — nudgeable + selectable shape
+    // 판다 스킨은 귀 "색"만 검게(귀 디자인 자체는 그대로 = 다른 스킨처럼 색만 변화). BEAR 상수 오염 방지 위해 지역 변수 사용.
+    const earCol = shp.body === 'panda' ? '#232227' : pal.ear
+    const earInCol = shp.body === 'panda' ? '#3d3c44' : pal.earIn
     for (const s of [-1, 1]) {
       ctx.save()
       ctx.translate(s * f.earDX, f.earDY)
       // 뿔 종류(antler/devil/goblin)는 "귀 대신" 귀 자리에 들어가므로 둥근 귀 base를 그리지 않음(§ears=귀 위치 대체 가능)
       if (shp.ear === 'round') {   // round bear ear
-        ctx.beginPath(); ctx.arc(cx + s * 32, hy - 34, 16, 0, Math.PI * 2); ink(ctx, volume(ctx, pal.ear, cx + s * 32, hy - 38, 16), 3)
-        ctx.fillStyle = pal.earIn; ctx.beginPath(); ctx.arc(cx + s * 32, hy - 32, 8.5, 0, Math.PI * 2); ctx.fill()
+        ctx.beginPath(); ctx.arc(cx + s * 32, hy - 34, 16, 0, Math.PI * 2); ink(ctx, volume(ctx, earCol, cx + s * 32, hy - 38, 16), 3)
+        ctx.fillStyle = earInCol; ctx.beginPath(); ctx.arc(cx + s * 32, hy - 32, 8.5, 0, Math.PI * 2); ctx.fill()
       } else if (shp.ear === 'folded') {
         ctx.beginPath()
         ctx.moveTo(cx + s * 15, hy - 33)
         ctx.quadraticCurveTo(cx + s * 42, hy - 44, cx + s * 41, hy - 24)
         ctx.quadraticCurveTo(cx + s * 30, hy - 19, cx + s * 15, hy - 25)
-        ctx.closePath(); ink(ctx, pal.ear, 3)
-        ctx.fillStyle = pal.earIn; ctx.beginPath()
+        ctx.closePath(); ink(ctx, earCol, 3)
+        ctx.fillStyle = earInCol; ctx.beginPath()
         ctx.moveTo(cx + s * 22, hy - 29); ctx.quadraticCurveTo(cx + s * 35, hy - 33, cx + s * 34, hy - 25)
         ctx.quadraticCurveTo(cx + s * 28, hy - 23, cx + s * 22, hy - 27); ctx.closePath(); ctx.fill()
       } else if (shp.ear === 'pointed') {   // pointed
@@ -601,8 +607,8 @@
         ctx.moveTo(cx + s * 16, hy - 30)
         ctx.quadraticCurveTo(cx + s * 34, hy - 60, cx + s * 45, hy - 24)
         ctx.quadraticCurveTo(cx + s * 30, hy - 22, cx + s * 16, hy - 30)
-        ctx.closePath(); ink(ctx, pal.ear, 3)
-        ctx.fillStyle = pal.earIn
+        ctx.closePath(); ink(ctx, earCol, 3)
+        ctx.fillStyle = earInCol
         ctx.beginPath()
         ctx.moveTo(cx + s * 22, hy - 30)
         ctx.quadraticCurveTo(cx + s * 33, hy - 48, cx + s * 39, hy - 27)
@@ -953,7 +959,7 @@
     ctx.restore()
 
     if (state.bubbleText && now < state.bubbleUntil) {
-      drawBubble(ctx, state.bubbleText, cx, BUBBLE_H + hy - 46, now, state.bubbleUntil)
+      drawBubble(ctx, state.bubbleText, cx, BUBBLE_H + hy - 46, now, state.bubbleUntil, state._bubbleClamp)
     }
   }
 

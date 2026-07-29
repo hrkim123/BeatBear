@@ -8,7 +8,7 @@ const SERVER_VERSION = process.env.SERVER_VERSION || (() => { try { return requi
 // ⭐ 접속 게이트는 앱 버전이 아니라 "프로토콜 버전"으로 판정한다. 서버와 주고받는 메시지 규약(타입·필드·좌표계 등
 // 양쪽이 동일하게 해석해야 하는 것)이 바뀔 때만 이 값을 올린다. 클라 전용(서버 무관) 릴리스는 이 값을 그대로 두어
 // 서버 재시작 없이도 구·신 클라가 함께 접속·플레이할 수 있다. **client(app.js)의 PROTOCOL_VERSION과 항상 일치시킬 것.**
-const PROTOCOL_VERSION = 1
+const PROTOCOL_VERSION = 2   // v0.1.7 프로토콜1 → 개발자 코인 상자(coinbox/coinclaim/coingot) 추가로 2
 
 const wss = new WebSocketServer({ port: PORT })
 const rooms = new Map() // code -> Map<id, { ws, name, animal }>
@@ -219,6 +219,12 @@ wss.on('connection', (ws, req) => {
       broadcast(joinedRoom, { t: 'gift-claim', id, target: msg.target }, id)      // 🎁 누군가 target 소유자의 상자를 대신 클릭(획득은 소유자에게)
     } else if (msg.t === 'gift-open') {
       broadcast(joinedRoom, { t: 'gift-open', id }, id)                           // 🎁 소유자가 상자 오픈 → 모두 오픈 연출
+    } else if (msg.t === 'coinbox') {
+      broadcast(joinedRoom, { t: 'coinbox', id, box: String(msg.box || ''), nx: msg.nx, ny: msg.ny, cur: msg.cur }, id)   // 🪙 개발자 코인 상자 생성(소유자=id)
+    } else if (msg.t === 'coinclaim') {
+      broadcast(joinedRoom, { t: 'coinclaim', id, box: String(msg.box || ''), to: msg.to }, id)                           // 🪙 상자 클릭(획득 요청) → 소유자(to)가 선착순 판정
+    } else if (msg.t === 'coingot') {
+      broadcast(joinedRoom, { t: 'coingot', id, box: String(msg.box || ''), winner: msg.winner }, id)                     // 🪙 소유자가 승자 확정 → 모두 상자 제거, 승자만 +1
     } else if (msg.t === 'chat' && typeof msg.text === 'string') {
       const now = Date.now()
       if (now - (me.lastChat || 0) < 400) return // spam guard

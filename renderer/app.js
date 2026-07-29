@@ -162,6 +162,11 @@
   try { const g = localStorage.getItem('giftPending'); if (g === '0' || g === '1') myGift = { type: +g, born: performance.now(), state: 'idle' } } catch {}
   const peerGifts = new Map()   // pid -> { type, born, state, openT }
   let giftHits = []             // per-frame [{ owner:'me'|pid, x, y, r }] 클릭 히트 + 핫존
+  // 🪙 개발자 코인 상자: 모드 ON 상태에서 좌클릭 지점에 코인 상자 생성 → 멀티에서 선착순 1명 획득(소유자 권한 판정)
+  const coinBoxes = new Map()   // box id → { nx, ny, cur:'paw'|'grizzle', owner(netId) }
+  let coinBoxHits = []          // per-frame [{ box, x, y, r }]
+  let coinBoxSeq = 0
+  let devCoinMode = null        // null | 'paw' | 'grizzle'
   function saveGiftState() { try { localStorage.setItem('giftProgress', String(Math.round(giftProgress))); if (myGift && myGift.state !== 'open') localStorage.setItem('giftPending', String(myGift.type)); else localStorage.removeItem('giftPending') } catch {} }
   function awardGift(type) { if (type === 0) addPawCoin(1); else if (window.BattleGacha) window.BattleGacha.addGems(1); try { showToast(type === 0 ? `🎁 ${coinIco('paw')} 파우 코인 +1` : `🎁 ${coinIco('grizzle')} 그리즐 코인 +1`) } catch {} pushState() }
   function bhAvailable() { return isOwned('blackhole') }   // black hole is shop-only now (no achievement)
@@ -258,7 +263,7 @@
   let keybinds = DEFAULT_KEYBINDS
   try { const kb = JSON.parse(localStorage.getItem('keybinds') || 'null'); if (kb && Array.isArray(kb.keys) && kb.keys.length) keybinds = { mod: kb.mod || 'alt', keys: kb.keys.slice(0, 3) } } catch {}
   if (inputSource.setKeybinds) inputSource.setKeybinds(keybinds)   // tell main which physical keys to watch
-  // 옵션: FPS 상한(기본 60 = 제한 없음) + F2 하단바 숨김 상태
+  // 옵션: FPS 상한(기본 60 = 제한 없음) + F3 하단바 숨김 상태
   let targetFps = 60; try { const f = parseInt(localStorage.getItem('fps') || '60', 10); if (f >= 20 && f <= 60) targetFps = f } catch {}
   let lastDraw = 0
   let barHidden = false; try { barHidden = localStorage.getItem('barHidden') === '1' } catch {}
@@ -324,11 +329,8 @@
     tapCount += n; counterDirty = true; renderCounter(); showCreditPop(n)
   }
   function loseCredits(n) { if (!n) return; tapCount = Math.max(0, tapCount - n); counterDirty = true; renderCounter(); showLossPop(n) }
-  function creditKill(kind, byId) {   // MY summoned entity was destroyed by a peer → I lose count; killer gains it
-    if (byId == null || !connected() || !net) return   // only a networked opponent's kill (not self/environmental) counts
-    const n = KILL_COUNT[kind] || 0
-    loseCredits(n)
-    net.send(JSON.stringify({ t: 'kill', kind, by: byId, amt: n }))
+  function creditKill(kind, byId) {   // (제거됨) 멀티에서 상대 소환체를 처치하면 카운트가 오르고(처치자) 내리던(소유자) 기능 삭제.
+    // 소환체를 죽여도/죽어도 비트 카운트는 변하지 않는다. 파라미터는 호출부 호환 위해 유지.
   }
   renderCounter()
   setInterval(() => { if (counterDirty) { localStorage.setItem('taps', String(tapCount)); localStorage.setItem('totalTaps', String(totalCount)); counterDirty = false } }, 1000)
@@ -583,6 +585,14 @@
   // recent changelog entry (the version just received) — skipped in-between notes are not shown.
   // Add newest versions at the TOP.
   const CHANGELOG = {
+    '0.1.8': [
+      '💬 화면 끝에서도 채팅 말풍선이 잘리지 않게 + 글자 크기 정리',
+      '⌨️ 하단바 숨기기 단축키 F2 → F3',
+      '🐼 판다 스킨 정리 — 귀는 꾸미기(귀)가 담당(적용 시 검은 귀)',
+      '♻️ 소환 › 조합 아이콘 정리',
+      '🔌 멀티 접속 안정화(프로토콜 버전 분리) · 🕳️ 작업표시줄 땅 파임 표시 보강',
+      '🧹 멀티에서 상대 소환체 처치로 비트 카운트가 오르내리던 현상 제거',
+    ],
     '0.1.7': [
       '🔌 멀티 접속 개선 — 서버와 무관한 클라 전용 업데이트는 서버 재시작 없이 접속(프로토콜 버전 분리)',
       '🕳️ 작업표시줄 땅 파임이 항상 보이도록 z-order 보강',
@@ -873,7 +883,7 @@
   }
 
   const FIXED_ROOM = 'MAIN'   // 모델2: 서버가 곧 방. 방 코드 없이 서버당 단일 공용 방 — 접속 대상은 서버 IP로만 구분
-  const PROTOCOL_VERSION = 1  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속
+  const PROTOCOL_VERSION = 2  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속. (2: 개발자 코인 상자 추가)
   function connect(url) {
     disconnect()
     setStatus('접속 중…')
@@ -970,6 +980,9 @@
       else if (msg.t === 'gift-spawn') { if (msg.id) peerGifts.set(msg.id, { type: (msg.gt | 0) === 1 ? 1 : 0, born: performance.now(), state: 'in' }) }   // 🎁 상대 상자 등장(고스트)
       else if (msg.t === 'gift-claim') { if (msg.target === me.netId) claimGift(true) }   // 🎁 누군가 내 상자를 대신 클릭 → 내가(소유자) 획득
       else if (msg.t === 'gift-open') { const g = peerGifts.get(msg.id); if (g && g.state !== 'open') { g.state = 'open'; g.openT = performance.now() } }   // 🎁 소유자 오픈 → 오픈 연출
+      else if (msg.t === 'coinbox') { if (msg.box) coinBoxes.set(msg.box, { nx: msg.nx || 0, ny: msg.ny || 0, cur: msg.cur === 'grizzle' ? 'grizzle' : 'paw', owner: msg.id }) }   // 🪙 상자 등장(소유자=msg.id)
+      else if (msg.t === 'coinclaim') { const b = coinBoxes.get(msg.box); if (b && b.owner === me.netId) awardCoinBox(msg.box, msg.id) }   // 🪙 내가 소유자 → 첫 요청자에게 지급(선착순)
+      else if (msg.t === 'coingot') { startCoinBoxOpen(msg.box, msg.winner) }   // 🪙 승자 확정 → 획득 연출(동전 날아감) + 승자만 +1 + 종료 후 제거
       else if (msg.t === 'digreset') { resetTaskbarDig(false) }   // someone restored → everyone restores
       else if (msg.t === 'peace') { setPeace(!!msg.on, true) }    // dev toggled peace mode → lock/unlock weapons for me too
       else if (msg.t === 'wlock') { if (msg.target === me.netId) { hostWlock = !!msg.on; if (hostWlock) clearMySummons(); showToast(hostWlock ? '🚫 호스트가 내 무기·소환체 사용을 잠갔어요' : '✅ 무기·소환체 잠금 해제') } }   // 호스트 per-user 잠금(나만 적용)
@@ -1238,6 +1251,9 @@
       toggleDesktopMode: () => { setDesktopMode(!desktopMode); return desktopMode },
       restoreBar: () => resetTaskbarDig(),
       switchView: () => { try { window.beatbear.toOverlay({ t: 'next-monitor' }) } catch (e) {} },   // 🖥 화면 전환: 다음 모니터로(모니터 1개면 no-op)
+      isDev: () => isDev,   // 개발자(BEATBEAR_DEV=1)에게만 개발자 카테고리 노출
+      getDevCoinMode: () => devCoinMode,
+      setDevCoinMode: (m) => { devCoinMode = (m === 'paw' || m === 'grizzle') ? m : null; sendHotzone() },   // 🪙 코인 뿌리기 모드(좌클릭 상자 생성) 토글
       setFocusable: (on) => { try { window.beatbear.setFocusable(on) } catch (e) {} },   // 메뉴 열림/닫힘에 따라 오버레이 포커스 허용/차단(입력칸 타이핑·복붙용)
       quit: () => { try { inputSource.quit() } catch (e) {} },
       checkUpdate: () => { try { if (inputSource.checkUpdate) inputSource.checkUpdate() } catch (e) {} },
@@ -1347,7 +1363,7 @@
     }
     else if (msg.t === 'connect') { connect(msg.url) }
     else if (msg.t === 'disconnect') { disconnect(); setStatus('오프라인 — 혼자 연주 중') }
-    else if (msg.t === 'toggle-bar') { setBarHidden(!barHidden); showToast(barHidden ? '👁️ 하단바 숨김 (F2로 복원)' : '👁️ 하단바 표시') }   // F2 전역키
+    else if (msg.t === 'toggle-bar') { setBarHidden(!barHidden); showToast(barHidden ? '👁️ 하단바 숨김 (F3로 복원)' : '👁️ 하단바 표시') }   // F3 전역키
     else if (msg.t === 'edit') { setEditing(!!msg.on) }
     else if (msg.t === 'safemode') { setSafeMode(!!msg.on) }
     else if (msg.t === 'chat') { openChat() }
@@ -4257,7 +4273,7 @@
     if (battleHud) { battleHud.remove(); battleHud = null }
     if (battleDebugHud) { battleDebugHud.remove(); battleDebugHud = null }   // 🧪 테스트 소환 HUD 정리
     sendHotzone()
-    { const hb = document.getElementById('hud-bar'); if (hb) hb.style.display = barHidden ? 'none' : '' }   // 배틀 종료 → 오버레이 하단바 복원(F2 숨김 상태는 유지)
+    { const hb = document.getElementById('hud-bar'); if (hb) hb.style.display = barHidden ? 'none' : '' }   // 배틀 종료 → 오버레이 하단바 복원(F3 숨김 상태는 유지)
     positionHud()
     if (connected()) net.send(JSON.stringify({ t: 'battle-state', on: false }))   // 관전자에게 "배틀 종료"
   }
@@ -6496,8 +6512,16 @@
     positionShop(); positionAchv(); positionPeace()
   }
   function positionChat() {
-    chatbar.style.left = (wx + cellPxW / 2) + 'px'
-    chatbar.style.top = (wy - 34) + 'px'
+    // 화면 끝 프리셋에서 채팅창이 오버레이 밖으로 나가 안 보이던 문제 → 뷰포트 안으로 클램프.
+    // chatbar는 width 고정 + transform:translateX(-50%)라 left=중심. 중심을 [w/2+M, vw-w/2-M]로 제한.
+    const w = chatbar.offsetWidth || 240, h = chatbar.offsetHeight || 32, M = 6
+    const vw = window.innerWidth, vh = window.innerHeight
+    let cx = wx + cellPxW / 2
+    cx = Math.max(w / 2 + M, Math.min(vw - w / 2 - M, cx))
+    let top = wy - 34
+    top = Math.max(M, Math.min(vh - h - M, top))
+    chatbar.style.left = cx + 'px'
+    chatbar.style.top = top + 'px'
   }
   // a peer's interaction counter — same bottom-bar design as MY HUD (#hud-bar + #counter),
   // Screen-space center of a peer's cat body (same placement math as the render loop), so
@@ -6548,11 +6572,12 @@
   let lastHzSend = 0, catRegenAt = 0
   function sendHotzone() {
     if (wx == null) return
-    const extra = giftHits.map((h) => ({ x: h.x - h.r - 3, y: h.y - h.r - 3, w: (h.r + 3) * 2, h: (h.r + 3) * 2 }))   // 🎁 상자 클릭영역(상대 상자 포함)
+    const extra = giftHits.concat(coinBoxHits).map((h) => ({ x: h.x - h.r - 3, y: h.y - h.r - 3, w: (h.r + 3) * 2, h: (h.r + 3) * 2 }))   // 🎁 선물 상자 + 🪙 코인 상자 클릭영역(누구나 클릭 가능)
     const exclusive = battleActive || platformMode   // 배틀/플랫폼 = 독점 입력(다른 기능·바탕화면 클릭 전부 차단)
     // 독점 모드에선 rect를 화면 전체로 → 커서가 어디에 있든 오버레이가 클릭을 잡아 바탕화면/파일 통과 차단(force와 이중 안전)
-    const rect = exclusive ? { x: 0, y: 0, w: canvas.clientWidth, h: canvas.clientHeight } : { x: wx, y: wy, w: cellPxW, h: cellPxH + BAR_SPACE }
-    inputSource.setHotzone({ rect, extra: exclusive ? [] : extra, force: exclusive || chatOpenFlag || editing || shopOpenFlag || achvOpenFlag || me.netAiming || me.netActive || updateNotesOpen || !!document.querySelector('.bg-back, .bm-root, .bm-bet, .bm-invite, .bx-confirm, .hgmenu-back') })
+    const fullScreen = exclusive || !!devCoinMode   // 개발자 코인 뿌리기 모드: 화면 전체를 클릭영역으로(독점모드와 동일 방식 — 어디를 클릭해도 캔버스가 받아 상자 생성)
+    const rect = fullScreen ? { x: 0, y: 0, w: canvas.clientWidth, h: canvas.clientHeight } : { x: wx, y: wy, w: cellPxW, h: cellPxH + BAR_SPACE }
+    inputSource.setHotzone({ rect, extra: exclusive ? [] : extra, force: fullScreen || chatOpenFlag || editing || shopOpenFlag || achvOpenFlag || me.netAiming || me.netActive || updateNotesOpen || !!document.querySelector('.bg-back, .bm-root, .bm-bet, .bm-invite, .bx-confirm, .hgmenu-back') })
   }
 
   // 메뉴 열려 있으면 캐릭터 위로 붙여 따라다니게(드래그 추종)
@@ -6570,6 +6595,9 @@
 
   // drag the cat (canvas) to move the whole widget — but not while editing
   canvas.addEventListener('mousedown', (e) => {
+    const cb = hitCoinBox(e.clientX, e.clientY)   // 🪙 코인 상자 클릭 → 선착순 획득(누구나)
+    if (cb) { clickCoinBox(cb); e.preventDefault(); return }
+    if (devCoinMode && e.button === 0 && !(window.HGMenu && window.HGMenu.isOpen())) { spawnCoinBox(e.clientX / canvas.clientWidth, e.clientY / canvas.clientHeight, devCoinMode); e.preventDefault(); return }   // 개발자 모드: 메뉴 닫힌 상태에서 좌클릭 지점에 상자 생성
     const gh = hitGift(e.clientX, e.clientY)   // 🎁 clicked a gift box? (내 것=바로 오픈 / 상대 것=대신 클릭→소유자 획득)
     if (gh) { if (gh.owner === 'me') claimGift(); else requestPeerGift(gh.owner); e.preventDefault(); return }
     if (editing || wx == null) return
@@ -6627,6 +6655,38 @@
     return { x: cx, y: cy, r: 22 * scale }
   }
   function hitGift(px, py) { for (const h of giftHits) if (Math.hypot(px - h.x, py - h.y) <= h.r + 3) return h; return null }
+  // ---------- 🪙 개발자 코인 상자 ----------
+  function grantCoinBoxReward(cur) {
+    if (cur === 'grizzle') { if (window.BattleGacha) window.BattleGacha.addGems(1) } else addPawCoin(1)
+    try { showToast(`${coinIco(cur)} +1 획득!`) } catch {}
+    pushState()
+  }
+  function spawnCoinBox(nx, ny, cur) {
+    const box = (me.netId || 'me') + ':' + (coinBoxSeq++)
+    coinBoxes.set(box, { nx, ny, cur, owner: me.netId })
+    if (connected() && net) net.send(JSON.stringify({ t: 'coinbox', box, nx, ny, cur }))
+  }
+  function startCoinBoxOpen(box, winner) {   // 획득 연출 시작: 동전이 승자 캐릭터로 날아감(선물 상자 오픈과 동일) → 종료 후 제거
+    const b = coinBoxes.get(box); if (!b || b.open) return
+    b.open = { t: performance.now(), winner }
+    if (winner === me.netId) grantCoinBoxReward(b.cur)
+    setTimeout(() => coinBoxes.delete(box), GIFT_OPEN_MS + 150)
+  }
+  function awardCoinBox(box, winner) {   // 소유자(또는 솔로)가 최종 판정 · 선착순 1명
+    const b = coinBoxes.get(box); if (!b || b.open) return
+    if (connected() && net) net.send(JSON.stringify({ t: 'coingot', box, winner }))
+    startCoinBoxOpen(box, winner)
+  }
+  function clickCoinBox(cb) {   // 상자 클릭: 내가 소유자/솔로면 즉시 판정, 아니면 소유자에게 획득 요청
+    const b = coinBoxes.get(cb.box); if (!b || b.open) return
+    if (!connected() || b.owner === me.netId) awardCoinBox(cb.box, me.netId)
+    else net.send(JSON.stringify({ t: 'coinclaim', box: cb.box, to: b.owner }))
+  }
+  function hitCoinBox(px, py) { for (const h of coinBoxHits) if (Math.hypot(px - h.x, py - h.y) <= h.r + 4) return h; return null }
+  // 기존 🎁 선물 상자 아트를 그대로 재사용(type0=파우/type1=그리즐 = giftPalette·awardGift와 동일 재화). 새로 그리지 않음.
+  function drawCoinBox(x, y, cur, now) {
+    drawGiftBox(ctx, { type: cur === 'grizzle' ? 1 : 0, state: 'idle', born: 0 }, x, y, 22, now, null)
+  }
   const GIFT_OPEN_MS = 2000   // 오픈 연출 길이(카드 표시 → 공중 머묾 → 흡수)
   function giftPalette(type) {
     return type === 0
@@ -6734,7 +6794,7 @@
     if (targetFps < 60 && now - lastDraw < 1000 / targetFps - 1.5) { requestAnimationFrame(frame); return }   // FPS 상한(렌더 스킵)
     lastDraw = now
     tickGift(now)   // 🎁 선물 상자 주기(타이핑 가속)·상태 갱신
-    if (!barApplied) { barApplied = true; try { setBarHidden(barHidden) } catch {} }   // 저장된 F2 하단바 숨김 상태 최초 적용
+    if (!barApplied) { barApplied = true; try { setBarHidden(barHidden) } catch {} }   // 저장된 F3 하단바 숨김 상태 최초 적용
     const dpr = window.devicePixelRatio || 1
     // keep both backing stores in sync with the CSS box (robust against resize timing)
     const cw = Math.round(canvas.clientWidth * dpr), ch = Math.round(canvas.clientHeight * dpr)
@@ -6796,6 +6856,7 @@
       ctx.translate(origins[i].x, origins[i].y)
       ctx.scale(scale, scale)
       p.hideDeskItems = battleActive   // 배틀 중 내 기지: 책상 키보드·마우스·이름표 숨김(그 자리에 체력 게이지)
+      p._bubbleClamp = { sx: origins[i].x, sy: origins[i].y, sc: scale, vw: cW, vh: cH }   // 말풍선을 화면 안으로 클램프하기 위한 셀 화면좌표·스케일·뷰포트
       window.AnimalArt.draw(ctx, p.animal, p, now)
       ctx.restore()
       if (p.id !== 'me' && p.taps != null) { ctx.save(); ctx.globalAlpha = peerAlpha(p.id); drawPeerCount(origins[i], p.taps); ctx.restore() }   // peer's counter (dims with 👁)
@@ -6812,6 +6873,18 @@
       ctx.save(); if (p.id !== 'me') ctx.globalAlpha = peerAlpha(p.id); drawGiftBox(ctx, g, rc.x, rc.y, rc.r, now, tgt); ctx.restore()
     })
     if (giftTimerShown && !battleActive) drawGiftTimer(ctx, origins[0].x + CELL_W / 2 * scale, origins[0].y + 6, now)   // 🎁 내 캐릭터 위 남은시간(하단바 클릭 토글)
+    // 🪙 개발자 코인 뿌리기 모드: 화면 전체에 옅은 캐치 레이어(투명 오버레이는 픽셀 알파로 히트테스트 →
+    // 투명한 곳은 클릭이 통과함. 옅게라도 칠해야 어디든 좌클릭이 캔버스에 잡혀 상자 생성 가능 + 모드 켜짐 표시).
+    if (devCoinMode && !battleActive) { ctx.save(); ctx.fillStyle = 'rgba(90,130,200,0.07)'; ctx.fillRect(0, 0, cW, cH); ctx.restore() }
+    // 🪙 개발자 코인 상자 렌더 + 클릭 히트 수집(배틀 중엔 숨김)
+    coinBoxHits = []
+    if (!battleActive) for (const [box, b] of coinBoxes) {
+      const x = b.nx * cW, y = b.ny * cH
+      if (b.open) {   // 획득 연출: 동전이 승자 캐릭터(catPos)로 날아감
+        let tgt = null; for (let i = 0; i < all.length; i++) { const idm = all[i].id === 'me' ? me.netId : all[i].id; if (idm === b.open.winner) { tgt = catPos[i]; break } }
+        drawGiftBox(ctx, { type: b.cur === 'grizzle' ? 1 : 0, state: 'open', openT: b.open.t, born: 0 }, x, y, 22, now, tgt || { x, y: y - 66 })
+      } else { drawCoinBox(x, y, b.cur, now); coinBoxHits.push({ box, x, y, r: 24 }) }
+    }
     if (battleActive && battleOpp) {   // 상대 고양이(우측 끝) — 솔로는 AI 더미
       const by = Math.max(0, battleDeskY() - (BUB + window.AnimalArt.DESK_Y) * scale)
       const bx = Math.min(cW - CELL_W * scale - 4, battleLaneX(1) - CELL_W / 2 * scale)

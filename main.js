@@ -457,8 +457,16 @@ app.whenReady().then(() => {
     screen.on('display-removed', () => scheduleRecover(true))
   } catch (e) { console.error('[beatbear] recover listeners failed:', e && e.message) }
 
-  const ok = globalShortcut.register('Control+Shift+B', openChatFocus)
-  if (!ok) console.error('[beatbear] failed to register chat hotkey Ctrl+Shift+B')
+  // Ctrl+Shift+B(채팅) 등록. 재시작 직후엔 죽은 이전 인스턴스가 아직 단축키를 OS에 반납 안 해 실패할 수 있으므로
+  // 성공할 때까지 잠깐씩 재시도(업데이트/재시작·dev 재기동에서 "채팅 안 열림" 방지).
+  ;(function registerChatHotkey(tries) {
+    if (!app.isReady()) return
+    let ok = false
+    try { ok = globalShortcut.isRegistered('Control+Shift+B') || globalShortcut.register('Control+Shift+B', openChatFocus) } catch (e) {}
+    if (ok) return
+    if (tries < 12) setTimeout(() => registerChatHotkey(tries + 1), 500)
+    else console.error('[beatbear] failed to register chat hotkey Ctrl+Shift+B (12회 재시도 실패)')
+  })(0)
 
   if (uIOhook) {
     const keysDown = new Set()
@@ -478,7 +486,7 @@ app.whenReady().then(() => {
       if (keysDown.has(e.keycode)) return
       keysDown.add(e.keycode)
       sendInput('key')
-      if (e.keycode === UiohookKey.F2 && win && !win.isDestroyed()) win.webContents.send('command', { t: 'toggle-bar' })   // F2: 하단바 숨김/표시(비소모)
+      if (e.keycode === UiohookKey.F3 && win && !win.isDestroyed()) win.webContents.send('command', { t: 'toggle-bar' })   // F3: 하단바 숨김/표시(비소모)
       const modOk = slotMod === 'custom' ? (slotModKey != null && keysDown.has(slotModKey)) : slotModMatches(isCtrl(), isAlt(), isShift(), isCaps())
       if (slotKeyMap[e.keycode] && modOk) {
         slotHeld.add(e.keycode)

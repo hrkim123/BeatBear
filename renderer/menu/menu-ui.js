@@ -82,12 +82,13 @@
 
   const NAV = [
     { ic: I_WARDROBE, name: '꾸미기', tabs: [[I_BODY, 'Skins'], ['🎩', 'Hats'], [I_EAR, 'Ears'], [I_EYE, 'Eyes'], [I_MOUTH, 'Mouth'], [I_PAW, 'Paw'], ['⌨️', '키보드'], ['🖱️', '마우스'], [I_DESK, '책상']] },
-    { ic: '🎲', name: '소환', pct: true, tabs: [['🎀', '외형 소환'], ['🗡️', '무기·소환체 소환'], ['🛠️', '조합']] },
+    { ic: '🎲', name: '소환', pct: true, tabs: [['🎀', '외형 소환'], ['🗡️', '무기·소환체 소환'], ['♻️', '조합']] },
     { ic: '🌐', name: '멀티플레이', tabs: [['🖥️', '데디케이트'], ['🌐', '로비']] },
     { ic: '📖', name: '컬렉션', tabs: [[I_SUMMON, '소환체'], ['🗡️', '무기']] },
     { ic: '🎮', name: '미니게임', tabs: [['🎯', '무기 설정'], ['⚔️', '배틀모드'], ['🏆', '업적']] },
     { ic: '⚡', name: '편의성', tabs: [] },
     { ic: '⚙️', name: '설정', tabs: [['🎚️', '옵션'], ['⌨️', '단축키']] },
+    { ic: '🛠️', name: '개발자', tabs: [], dev: true },   // 개발자(BEATBEAR_DEV=1)에게만 노출
   ]
 
   const STYLE_ID = 'hgmenu-style'
@@ -308,7 +309,7 @@
         <button class="hgm-topbtn" data-act="quit">⏻ 종료</button>
         <button class="hgm-topbtn" data-act="upd">⟳ 업데이트 확인</button>
       </div>
-      <div class="hgm-note">💬 <b>Ctrl+Shift+B</b> : 채팅 열기 · Enter 전송/Esc 취소<br>👁️ <b>F2</b> : 하단바 숨기기/보이기</div>`
+      <div class="hgm-note">💬 <b>Ctrl+Shift+B</b> : 채팅 열기 · Enter 전송/Esc 취소<br>👁️ <b>F3</b> : 하단바 숨기기/보이기</div>`
   }
   function wireTop(pop) {
     const q = pop.querySelector('[data-act="quit"]'); if (q) q.onclick = () => { if (B.quit) B.quit() }
@@ -329,6 +330,20 @@
         pop.querySelector('[data-act="dim"]').onclick = () => { if (B.togglePeersDim) B.togglePeersDim(); rr() }
         pop.querySelector('[data-act="desk"]').onclick = () => { if (B.toggleDesktopMode) B.toggleDesktopMode(); rr() }
         pop.querySelector('[data-act="restore"]').onclick = () => { if (B.restoreBar) B.restoreBar() }
+      }
+    }
+  }
+
+  function devPane() {
+    const mode = B.getDevCoinMode ? B.getDevCoinMode() : null
+    const seg = (val, label) => `<button class="hgm-stb ${(val ? mode === val : !mode) ? 'on' : ''}" data-dev="${val}">${label}</button>`
+    const html =
+      `<div class="hgm-sec">코인 상자 뿌리기 <span class="hgm-dim">개발자 전용</span></div>` +
+      `<div class="hgm-subtabs">${seg('', '⛔ 끄기')}${seg('paw', coinIcon('paw') + ' 파우')}${seg('grizzle', coinIcon('grizzle') + ' 그리즐')}</div>` +
+      `<div class="hgm-note">켜면 오버레이 화면을 <b>좌클릭</b>한 지점에 코인 상자가 생깁니다. 멀티에서는 <b>가장 먼저 클릭한 사람</b>이 해당 코인 1개를 획득해요. (상자는 클릭 전까지 유지)</div>`
+    return {
+      html, wire(pop, rr) {
+        pop.querySelectorAll('[data-dev]').forEach((b) => b.onclick = () => { if (B.setDevCoinMode) B.setDevCoinMode(b.dataset.dev || null); rr() })
       }
     }
   }
@@ -882,6 +897,7 @@
     if (big === 5) return conveniencePane()
     if (big === 6 && s === 0) return optionsPane()
     if (big === 6 && s === 1) return keysPane()
+    if (big === 7) return devPane()
     return stubPane(cat.name, sub)
   }
 
@@ -889,7 +905,8 @@
   function render(pop) {
     stopPreviewAnim()   // 이전 미리보기 애니 정리(innerHTML 교체로 캔버스 사라짐)
     const cat = NAV[big]
-    const rail = NAV.map((c, i) => `<button class="hgm-rbtn ${i === big ? 'on' : ''}" data-tip="${c.name}" data-big="${i}">${c.ic}</button>`).join('')
+    const devOn = !!(B.isDev && B.isDev())
+    const rail = NAV.map((c, i) => (c.dev && !devOn) ? '' : `<button class="hgm-rbtn ${i === big ? 'on' : ''}" data-tip="${c.name}" data-big="${i}">${c.ic}</button>`).join('')
     const tabs = cat.tabs.map((t, i) => `<button class="hgm-tb ${i === smallSel[big] ? 'on' : ''}" data-tip="${t[1]}" data-small="${i}">${t[0]}</button>`).join('')
     const right = (cat.pct && !(big === 1 && smallSel[1] === 2) ? '<button class="hgm-pct" data-tip="확률">%</button>' : '') + '<button class="hgm-x" data-tip="닫기">✕</button>'
     const content = paneContent()
