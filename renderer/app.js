@@ -163,7 +163,7 @@
   const peerGifts = new Map()   // pid -> { type, born, state, openT }
   let giftHits = []             // per-frame [{ owner:'me'|pid, x, y, r }] 클릭 히트 + 핫존
   function saveGiftState() { try { localStorage.setItem('giftProgress', String(Math.round(giftProgress))); if (myGift && myGift.state !== 'open') localStorage.setItem('giftPending', String(myGift.type)); else localStorage.removeItem('giftPending') } catch {} }
-  function awardGift(type) { if (type === 0) addPawCoin(1); else if (window.BattleGacha) window.BattleGacha.addGems(1); try { showToast(type === 0 ? '🎁 🐾 Paw Coin +1' : '🎁 🔴 Grizzle Coin +1') } catch {} pushState() }
+  function awardGift(type) { if (type === 0) addPawCoin(1); else if (window.BattleGacha) window.BattleGacha.addGems(1); try { showToast(type === 0 ? `🎁 ${coinIco('paw')} 파우 코인 +1` : `🎁 ${coinIco('grizzle')} 그리즐 코인 +1`) } catch {} pushState() }
   function bhAvailable() { return isOwned('blackhole') }   // black hole is shop-only now (no achievement)
   // can this weapon actually be used right now? (missile is free; everything else must be owned)
   function weaponUsable(id) {
@@ -504,16 +504,20 @@
   let appearCraftUses = parseInt(localStorage.getItem('appearCraftUses') || '0', 10) || 0
   let weaponCraftUses = parseInt(localStorage.getItem('weaponCraftUses') || '0', 10) || 0
   let achvCleared = {}; try { achvCleared = JSON.parse(localStorage.getItem('achvCleared') || '{}') || {} } catch {}   // {업적id: 달성 단계 수}
-  const PAW = 'paw', GRZ = 'grizzle'   // 🐾 파우 코인(외형) / 💎 그리즐 코인(무기·소환체=gems)
+  const PAW = 'paw', GRZ = 'grizzle'   // 파우 코인(외형·금색) / 그리즐 코인(무기·소환체=gems·빨강)
+  function coinIco(cur) {   // 실제 게임 코인 아이콘 SVG(menu-ui와 동일). 미로드 시 색 이모지 폴백.
+    try { if (window.HGMenu && window.HGMenu.coinIcon) return window.HGMenu.coinIcon(cur) } catch {}
+    return cur === PAW ? '🟡' : '🔴'
+  }
   function grantCoin(kind, n) { if (kind === PAW) addPawCoin(n); else if (window.BattleGacha) window.BattleGacha.addGems(n) }
-  function coinLabel(kind, n) { return (kind === PAW ? '🐾' : '💎') + n }
+  function coinLabel(kind, n) { return coinIco(kind) + ' ' + n }
   function ownedUnitsWeapons() { return (window.BattleGacha && window.BattleGacha.catalog) ? window.BattleGacha.catalog().filter((e) => e.owned).length : 0 }
   function ownedAppearCount() { return [...ownedAppear].filter((k) => /^(skin|hat|ear|eye|mouth|hand):/.test(k)).length }
   function rangeStages(start, step, max) { const a = []; for (let v = start; v <= max; v += step) a.push(v); return a }
   const CRAFT_STAGES = [5].concat(rangeStages(15, 10, 100))   // 5,15,25,…,95 (첫 5 후 +10, ≤100)
   const ACHV = [
     { id: 'cum', icon: '🥁', title: '누적 비트 카운트', metric: () => totalCount, stages: rangeStages(50000, 50000, 5000000), reward: (i) => ({ kind: i % 2 === 0 ? PAW : GRZ, n: 3 }) },   // 5만씩 5백만까지, 파우/그리즐 교대
-    { id: 'collWU', icon: '⚔', title: '무기·소환체 컬렉션', metric: ownedUnitsWeapons, stages: rangeStages(5, 5, 30), reward: () => ({ kind: PAW, n: 3 }) },
+    { id: 'collWU', icon: '⚔', title: '무기·소환체 컬렉션', metric: ownedUnitsWeapons, stages: rangeStages(10, 5, 30), reward: () => ({ kind: PAW, n: 3 }) },   // 기본 지급(5종)으로 5칸은 즉시 달성 → 10부터 시작
     { id: 'collAp', icon: '🎀', title: '꾸미기 컬렉션', metric: ownedAppearCount, stages: rangeStages(5, 5, 30), reward: () => ({ kind: GRZ, n: 3 }) },
     { id: 'craftAp', icon: '🛠️', title: '꾸미기 조합 이용', metric: () => appearCraftUses, stages: CRAFT_STAGES.slice(), reward: () => ({ kind: GRZ, n: 3 }) },
     { id: 'craftWU', icon: '🛠️', title: '무기·소환체 조합 이용', metric: () => weaponCraftUses, stages: CRAFT_STAGES.slice(), reward: () => ({ kind: PAW, n: 3 }) },
@@ -579,15 +583,21 @@
   // recent changelog entry (the version just received) — skipped in-between notes are not shown.
   // Add newest versions at the TOP.
   const CHANGELOG = {
+    '0.1.4': [
+      '🩹 오버레이가 잠깐 사라졌다 나타나는 깜빡임 수정(포커스 훔침 제거 · 전체화면 오판 방지)',
+      '🪙 파우/그리즐 실제 코인 아이콘 적용(베팅·업적·선물)',
+      '🏆 업적 무기·소환체 컬렉션 10개부터 시작',
+      '🧩 배틀 기본 소환체·덱 자동 복구(비어 있으면 기본 편성)',
+    ],
     '0.1.3': [
       '👑 호스트 강퇴 수정 — 접속 방식과 무관하게 확실히 작동(방에 처음 접속한 사람=호스트)',
-      '🎲 배틀 베팅 재화 정리 — 무배팅 / 🐾 파우 코인 / 💎 그리즐 코인',
+      '🎲 배틀 베팅 재화 정리 — 무배팅 / 파우 코인 / 그리즐 코인',
     ],
     '0.1.2': [
       '🐻 BeatBear 첫 릴리스 — 곰 캐릭터로 새 출발',
       '🧭 햄버거 메뉴 대개편 — 꾸미기·소환·컬렉션·미니게임·편의성·설정 팝업',
       '🎨 꾸미기 확장 — 스킨·모자·귀·눈·입·손·책상·키보드·마우스',
-      '🏆 업적 개편(누적 비트·컬렉션·조합) — 🐾파우/💎그리즐 코인 보상',
+      '🏆 업적 개편(누적 비트·컬렉션·조합) — 파우/그리즐 코인 보상',
       '👁️ 투명 모드 · 👑 호스트 강퇴·무기 잠금(멀티)',
     ],
   }
@@ -1401,9 +1411,10 @@
   // "new version ready" toast (shown when an update downloads while the app is running)
   const updateToast = document.getElementById('update-toast')
   let updateToastTimer = null
+  function escT(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
   function showToast(text, ms) {
     if (!updateToast) return
-    updateToast.textContent = text
+    if (/<svg|<img\b/.test(text)) updateToast.innerHTML = text; else updateToast.textContent = text   // 코인 SVG 등 아이콘 포함 시 HTML 렌더(동적 이름은 escT로 이스케이프해 전달)
     updateToast.classList.remove('hidden')
     clearTimeout(updateToastTimer)
     updateToastTimer = setTimeout(() => updateToast.classList.add('hidden'), ms || 2400)   // quick auto-dismiss
@@ -3806,13 +3817,13 @@
   let battleMulti = null, battleInvite = null, battleIncoming = null, battleFlip = false, battleAwaitingGo = null, battleAwaitTimer = null   // battleAwaitingGo=내가 수락 후 신청자 확답(battle-go) 대기중(유령 배틀 방지 핸드셰이크)
   let battleBet = null, battleBetSettled = false   // 베팅: {cur:'count'|'gems'|'mat', amt}. 진입 시 escrow 차감, 결과 시 1회 정산.
   let battleBetResult = null   // 결과창 표시용: {cur, amt, win, bal(정산 후 보유량)}
-  const BET_CUR = { paw: { name: '파우 코인', emoji: '🐾' }, grizzle: { name: '그리즐 코인', emoji: '💎' } }
+  const BET_CUR = { paw: { name: '파우 코인' }, grizzle: { name: '그리즐 코인' } }
   function betBalance(cur) { return cur === 'paw' ? pawCoin : cur === 'grizzle' ? (window.BattleGacha ? window.BattleGacha.getGems() : 0) : 0 }
   function betAdd(cur, n) {   // n 음수=차감. 파우=pawCoin, 그리즐=BattleGacha gems.
     if (cur === 'paw') addPawCoin(n)
     else if (cur === 'grizzle' && window.BattleGacha) window.BattleGacha.addGems(n)
   }
-  function betLabel(bet) { const c = BET_CUR[bet.cur] || {}; return `${c.emoji || ''} ${bet.amt}` }   // 아이콘 + 금액(이름 생략)
+  function betLabel(bet) { return `${coinIco(bet.cur)} ${bet.amt}` }   // 실제 코인 아이콘 + 금액(이름 생략)
   function settleBattleBet(win) {   // 결과 1회 정산: 승=팟(2×) 수령(순 +amt), 패=escrow 유지(순 -amt)
     if (!battleBet || battleBetSettled) return
     battleBetSettled = true
@@ -4040,7 +4051,7 @@
     if (battleInvite && battleInvite.to !== peerId && connected()) net.send(JSON.stringify({ t: 'battle-cancel', to: battleInvite.to }))
     battleInvite = { to: peerId, at: performance.now(), bet }
     net.send(JSON.stringify({ t: 'battle-req', to: peerId, bet }))
-    showToast(`⚔ ${p.name || '상대'} 님에게 배틀 신청${bet ? ` (베팅 ${betLabel(bet)})` : ''}… 응답 대기`)
+    showToast(`⚔ ${escT(p.name || '상대')} 님에게 배틀 신청${bet ? ` (베팅 ${betLabel(bet)})` : ''}… 응답 대기`)
   }
   // 내 초대 팝업을 외부(취소 수신 등)에서 닫기
   function closeBattleInvitePopup() { const el = document.querySelector('.bm-invite'); if (el) el.remove(); battleIncoming = null; sendHotzone() }
@@ -4065,7 +4076,7 @@
     const card = document.createElement('div')
     card.style.cssText = 'background:linear-gradient(180deg,#1a1f28,#12151b);border:1px solid #39414f;border-radius:14px;padding:18px 20px;width:min(340px,90vw);box-shadow:0 18px 50px rgba(0,0,0,.6);color:#e8ebf0'
     let cur = 'none'
-    const curs = [['none', '무배팅'], ['paw', '🐾'], ['grizzle', '💎']]   // 무배팅 / 파우(아이콘만) / 그리즐(아이콘만)
+    const curs = [['none', '무배팅'], ['paw', coinIco('paw')], ['grizzle', coinIco('grizzle')]]   // 무배팅 / 파우(실제 코인 아이콘) / 그리즐(실제 코인 아이콘)
     card.innerHTML = `<div style="font-size:15px;font-weight:700;margin-bottom:4px">⚔ ${p.name || '상대'} 에게 배틀 신청</div>
       <div style="font-size:12px;color:#8fa0b4;margin-bottom:12px">베팅 재화와 금액 선택 (지면 잃고, 이기면 2배)</div>
       <div class="betcurs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>

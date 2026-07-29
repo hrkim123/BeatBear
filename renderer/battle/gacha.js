@@ -41,7 +41,11 @@
   const DEFAULT_UNITS = ['ant', 'rifleman', 'grenadier', 'scout', 'shielder']
   const DEFAULT_WEAPONS = ['missile']
   ;[...DEFAULT_UNITS, ...DEFAULT_WEAPONS].forEach((id) => { if (!owned[id]) owned[id] = true; if (!levels[id]) levels[id] = 1 })
-  if (!deck.unitsA.length && !deck.unitsB.length && !deck.weapons.length) { deck = { unitsA: DEFAULT_UNITS.slice(0, DECK_SET_SIZE), unitsB: [], weapons: DEFAULT_WEAPONS.slice() }; localStorage.setItem(K.deck, JSON.stringify(deck)) }
+  // 자가 복구: 유닛 2세트가 모두 비었으면 A세트에 기본 유닛 채우고, 무기가 비었으면 기본 무기 채움(각각 독립 판정 — 무기만 남고 유닛이 빈 stuck 상태도 복구).
+  { let dch = false
+    if (!deck.unitsA.length && !deck.unitsB.length) { deck.unitsA = DEFAULT_UNITS.slice(0, DECK_SET_SIZE); dch = true }
+    if (!deck.weapons.length) { deck.weapons = DEFAULT_WEAPONS.slice(); dch = true }
+    if (dch) localStorage.setItem(K.deck, JSON.stringify(deck)) }
   // 보유 아이템은 최소 1개 count로 시드(구 저장분 마이그레이션)
   Object.keys(owned).forEach((id) => { if (owned[id] && !(counts[id] > 0)) counts[id] = 1 })
   saveOwned(); saveCounts()

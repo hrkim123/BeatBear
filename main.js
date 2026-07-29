@@ -7,6 +7,11 @@ let updater = null   // electron-updater instance (set in initAutoUpdate), for r
 // disabling GPU compositing is a common fix. (Light overlay, negligible perf cost.)
 app.disableHardwareAcceleration()
 
+// 투명·클릭통과 오버레이가 "잠깐 사라졌다 다시 나타나는" 깜빡임의 근본 원인:
+// Chromium이 다른 창이 잠깐 겹치면 창을 '가려짐(occluded)'으로 오판해 컴포지팅(렌더)을 멈췄다가
+// 다시 그린다(창의 isVisible()은 계속 true인데 화면만 blank→repaint). 이 기능을 꺼서 항상 그리게 한다.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+
 // 개발 빌드(소스에서 실행 = unpackaged)는 설치된 배포 앱과 저장소·단일인스턴스 락이 겹치지 않도록
 // 별도 userData 폴더를 사용한다. → dev로 켜도 배포 앱의 실제 데이터(가챠·덱·설정 등)를 건드리지 않고,
 // 둘을 번갈아/동시에 켜도 초기화·충돌이 없다. (배포 설치본은 그대로 'beatbear' 사용)
@@ -160,6 +165,12 @@ function activeDisplay() {
   return all[Math.min(curDisp, all.length - 1)] || screen.getPrimaryDisplay()
 }
 
+// 창을 모니터보다 WIN_PAD(px)만큼 크게(오른쪽·아래로 화면 밖 오버행). 창 rect가 모니터 rect와
+// 정확히 일치하면 Windows가 '보더리스 전체화면 최적화(독점 전체화면 유사)'로 오인해, 포커스 시 컴포지팅
+// 모드를 전환하며 blank flash(깜빡임)가 난다. 1px 키워 exact-fullscreen 판정을 피한다. 원점(x,y)은
+// 그대로라 winOrigin·hotzone 좌표 계산은 불변, 오버행은 화면 밖이라 보이지 않는다.
+const WIN_PAD = 1
+function overlayBounds(b) { return { x: b.x, y: b.y, width: b.width + WIN_PAD, height: b.height + WIN_PAD } }
 function createWindow() {
   const displays = screen.getAllDisplays()
   curDisp = displays.findIndex((d) => d.id === screen.getPrimaryDisplay().id)
@@ -167,12 +178,15 @@ function createWindow() {
   const b = activeDisplay().bounds
   winOrigin = { x: b.x, y: b.y }
   win = new BrowserWindow({
-    x: b.x, y: b.y, width: b.width, height: b.height,
+    x: b.x, y: b.y, width: b.width + WIN_PAD, height: b.height + WIN_PAD,
     transparent: true,
     frame: false,
     backgroundColor: '#00000000',
     alwaysOnTop: true,
     hasShadow: false,
+    focusable: false,    // 오버레이는 절대 활성화(foreground)되지 않음(WS_EX_NOACTIVATE). 클릭은 그대로 받되
+                         // 포커스를 훔치지 않아 focus/blur 시 전체화면 투명 레이어드 창의 재-blend 깜빡임이 사라진다.
+                         // 채팅 입력 시에만 setFocusable(true)로 잠시 허용(openChatFocus) 후 복귀(chat-close).
     resizable: true,     // must be resizable or Windows clamps us to the work area (can't
     movable: false,      // cover the taskbar). frame:false means no user-facing resize grips.
     minimizable: false,
@@ -183,7 +197,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false   // 오버레이는 항상 비포커스(클릭통과)라, 블러 시 렌더/타이머 스로틀로 애니메이션이 멈추거나 끊기는 것 방지
     }
   })
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
@@ -193,7 +208,7 @@ function createWindow() {
     // Windows clamps the initial size to the work area; re-assert full monitor bounds so the
     // overlay actually covers the taskbar (needed for ants/cracks/missiles down there).
     const fb = activeDisplay().bounds
-    win.setBounds({ x: fb.x, y: fb.y, width: fb.width, height: fb.height })
+    win.setBounds(overlayBounds(fb))
   })
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setIgnoreMouseEvents(true, { forward: true }) // click-through; forward mousemove for hover
@@ -211,7 +226,7 @@ function moveToNextDisplay() {
   curDisp = (curDisp + 1) % all.length
   const b = all[curDisp].bounds
   winOrigin = { x: b.x, y: b.y }
-  win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height })
+  win.setBounds(overlayBounds(b))
   stripWin11Chrome(win) // re-assert no-border after the move, just in case
   hotzone = defaultHotzone()
   sendLayout()
@@ -338,9 +353,9 @@ function recoverOverlay(full) {
   try {
     const b = activeDisplay().bounds
     winOrigin = { x: b.x, y: b.y }
-    const cur = win.getBounds()
-    if (cur.x !== b.x || cur.y !== b.y || cur.width !== b.width || cur.height !== b.height) {
-      win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height }); boundsChanged = true
+    const tb = overlayBounds(b), cur = win.getBounds()
+    if (cur.x !== tb.x || cur.y !== tb.y || cur.width !== tb.width || cur.height !== tb.height) {
+      win.setBounds(tb); boundsChanged = true
     }
   } catch (e) { console.error('[beatbear] recover bounds failed:', e && e.message); boundsChanged = true }
   if (full || boundsChanged || !win.isVisible()) {   // 실제 변화/숨김일 때만 다시 그림 → 불필요한 깜빡임 제거
@@ -364,6 +379,7 @@ function openChatFocus() {
   chatting = true          // allow the overlay to stay focused while typing
   interactive = true
   win.setIgnoreMouseEvents(false)
+  win.setFocusable(true)   // 채팅 입력 위해 일시적으로 포커스 허용(평소엔 focusable:false)
   win.show(); win.focus()
   win.webContents.send('chat-open')
 }
@@ -516,7 +532,7 @@ ipcMain.on('hotzone', (_e, z) => {
 ipcMain.on('quit', () => app.quit())
 ipcMain.on('chat-close', () => {
   chatting = false
-  if (win && !win.isDestroyed()) { win.blur(); reassertOverlay() }
+  if (win && !win.isDestroyed()) { win.blur(); win.setFocusable(false); reassertOverlay() }   // 채팅 종료 → 다시 non-activating으로
 })
 
 // relay settings-window commands → overlay

@@ -551,7 +551,7 @@
     const rows = list.map((a) => {
       const pct = a.done ? 100 : Math.min(100, Math.round((a.cur / Math.max(1, a.goal)) * 100))
       const status = a.done ? '✅ 전 단계 달성 완료' : `${(a.cur || 0).toLocaleString()} / ${(a.goal || 0).toLocaleString()} · ${a.cleared || 0}단계`
-      return `<div class="hgm-ach"><div class="hgm-achhd"><span>${esc(a.icon)} ${esc(a.title)}</span><span class="hgm-dim">${esc(a.reward)}</span></div><div class="hgm-achbar"><div class="hgm-achfill" style="width:${pct}%"></div></div><div class="hgm-dim" style="font-size:10px;margin-top:3px">${esc(status)}</div></div>`
+      return `<div class="hgm-ach"><div class="hgm-achhd"><span>${esc(a.icon)} ${esc(a.title)}</span><span class="hgm-dim">${a.reward}</span></div><div class="hgm-achbar"><div class="hgm-achfill" style="width:${pct}%"></div></div><div class="hgm-dim" style="font-size:10px;margin-top:3px">${esc(status)}</div></div>`
     }).join('')
     return { html: `<div class="hgm-sec">업적</div>${rows}` }
   }
@@ -938,5 +938,6 @@
   onKey.active = false
   window.addEventListener('keydown', onKey)
 
-  window.HGMenu = { open, close, isOpen, refresh, reposition, setBridges }
+  function coinIcon(k) { return (k === 'grizzle' || k === 'grz' || k === 'gem') ? COIN_GRIZZLE : COIN_PAW }   // 실제 게임 코인 아이콘(금색 파우 / 빨강 그리즐) 공유
+  window.HGMenu = { open, close, isOpen, refresh, reposition, setBridges, coinIcon }
 })()
