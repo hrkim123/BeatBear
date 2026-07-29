@@ -514,6 +514,13 @@ ipcMain.on('antmecha-control', (_e, active) => { antMechaActive = !!active })
 ipcMain.on('set-keybinds', (_e, kb) => applyKeybinds(kb))
 ipcMain.on('open-settings', toggleSettings)
 ipcMain.on('desktop-mode', (_e, on) => { desktopMode = !!on; applyLayer() })   // 바탕화면 모드 토글(최상단 ↔ 맨 뒤)
+// 메뉴 열림 동안만 오버레이를 포커스 가능하게(평소 focusable:false → 입력칸 타이핑·복붙 불가 회귀 방지).
+ipcMain.on('set-focusable', (_e, on) => {
+  if (!win || win.isDestroyed()) return
+  win.setFocusable(!!on)
+  if (on) { try { win.show(); win.focus() } catch (e) {} }      // 메뉴 입력에 키보드 포커스 부여
+  else { try { win.blur() } catch (e) {} ; reassertOverlay() }  // 메뉴 닫힘 → non-activating 복귀 + 클릭통과 재적용
+})
 ipcMain.on('apply-update', () => { if (updater) { try { updater.quitAndInstall(true, true) } catch (e) {} } })
 ipcMain.on('check-update', () => {
   if (updater && updater.checkManual) { updater.checkManual(); return }

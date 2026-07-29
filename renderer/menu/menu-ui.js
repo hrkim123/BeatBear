@@ -931,8 +931,9 @@
     document.body.appendChild(root)
     render(curPop); position(curPop, anchor)
     onKey.active = true; hostSync()
+    if (B.setFocusable) B.setFocusable(true)   // 메뉴 열림: 입력칸(서버 주소·이름·단축키) 타이핑·복붙 위해 오버레이 포커스 허용(평소엔 focusable:false)
   }
-  function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; hostSync() }
+  function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; if (B.setFocusable) B.setFocusable(false); hostSync() }   // 메뉴 닫힘: 다시 non-activating(깜빡임 방지)
   function refresh() { if (root && curPop) render(curPop) }   // 로스터 등 변화 시 앱이 호출
   function reposition(a) { if (root && curPop) { if (a) lastAnchor = a; position(curPop, lastAnchor) } }   // 캐릭터 드래그 시 앱이 매 틱 호출
 

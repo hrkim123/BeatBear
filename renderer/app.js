@@ -583,6 +583,9 @@
   // recent changelog entry (the version just received) — skipped in-between notes are not shown.
   // Add newest versions at the TOP.
   const CHANGELOG = {
+    '0.1.6': [
+      '⌨️ 메뉴 입력칸(서버 주소·이름·단축키) 타이핑·복사·붙여넣기 복구',
+    ],
     '0.1.5': [
       '🖥️ 화면 전환(다음 모니터) 복구 — 설정 › 옵션에서 사용',
     ],
@@ -1230,6 +1233,7 @@
       toggleDesktopMode: () => { setDesktopMode(!desktopMode); return desktopMode },
       restoreBar: () => resetTaskbarDig(),
       switchView: () => { try { window.beatbear.toOverlay({ t: 'next-monitor' }) } catch (e) {} },   // 🖥 화면 전환: 다음 모니터로(모니터 1개면 no-op)
+      setFocusable: (on) => { try { window.beatbear.setFocusable(on) } catch (e) {} },   // 메뉴 열림/닫힘에 따라 오버레이 포커스 허용/차단(입력칸 타이핑·복붙용)
       quit: () => { try { inputSource.quit() } catch (e) {} },
       checkUpdate: () => { try { if (inputSource.checkUpdate) inputSource.checkUpdate() } catch (e) {} },
       getKeybinds: () => ({ mod: keybinds.mod, keys: keybinds.keys.slice() }),

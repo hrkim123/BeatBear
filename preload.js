@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('beatbear', {
   antMechaControl(active) { ipcRenderer.send('antmecha-control', !!active) },
   setKeybinds(kb) { ipcRenderer.send('set-keybinds', kb) },
   setDesktopMode(on) { ipcRenderer.send('desktop-mode', !!on) },   // 바탕화면 모드(최상단 ↔ 맨 뒤)
+  setFocusable(on) { ipcRenderer.send('set-focusable', !!on) },   // 메뉴 열림 동안만 오버레이 포커스 허용(입력칸 타이핑·복붙)
   pushState(state) { ipcRenderer.send('to-settings', state) },
   quit() { ipcRenderer.send('quit') },
 
