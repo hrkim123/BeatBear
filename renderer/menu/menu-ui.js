@@ -373,11 +373,13 @@
   function optionsPane() {
     const fps = B.getFps ? B.getFps() : 60
     const html = settingsTop() +
+      `<div class="hgm-opt">화면 전환 <button class="hgm-btn ghost" id="hgm-switchview" style="padding:6px 12px">🖥️ 다음 모니터</button></div>` +
       `<div class="hgm-opt">언어 <select><option>한국어</option></select></div>` +
       `<div class="hgm-opt">FPS <input type="range" id="hgm-fps" min="20" max="60" step="5" value="${fps}"><span id="hgm-fpsv" class="hgm-dim">${fps}</span></div>`
     return {
       html, wire(pop) {
         wireTop(pop)
+        const sv = pop.querySelector('#hgm-switchview'); if (sv) sv.onclick = () => { if (B.switchView) B.switchView() }
         const f = pop.querySelector('#hgm-fps'); if (f) f.oninput = () => { pop.querySelector('#hgm-fpsv').textContent = f.value; if (B.setFps) B.setFps(+f.value) }
       }
     }

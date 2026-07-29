@@ -583,6 +583,9 @@
   // recent changelog entry (the version just received) — skipped in-between notes are not shown.
   // Add newest versions at the TOP.
   const CHANGELOG = {
+    '0.1.5': [
+      '🖥️ 화면 전환(다음 모니터) 복구 — 설정 › 옵션에서 사용',
+    ],
     '0.1.4': [
       '🩹 오버레이가 잠깐 사라졌다 나타나는 깜빡임 수정(포커스 훔침 제거 · 전체화면 오판 방지)',
       '🪙 파우/그리즐 실제 코인 아이콘 적용(베팅·업적·선물)',
@@ -1226,6 +1229,7 @@
       getDesktopMode: () => desktopMode,
       toggleDesktopMode: () => { setDesktopMode(!desktopMode); return desktopMode },
       restoreBar: () => resetTaskbarDig(),
+      switchView: () => { try { window.beatbear.toOverlay({ t: 'next-monitor' }) } catch (e) {} },   // 🖥 화면 전환: 다음 모니터로(모니터 1개면 no-op)
       quit: () => { try { inputSource.quit() } catch (e) {} },
       checkUpdate: () => { try { if (inputSource.checkUpdate) inputSource.checkUpdate() } catch (e) {} },
       getKeybinds: () => ({ mod: keybinds.mod, keys: keybinds.keys.slice() }),
