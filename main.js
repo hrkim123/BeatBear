@@ -324,11 +324,26 @@ function pushToBottom() {
   ].join('; ')
   require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {})
 }
-// 창 레이어 적용: 바탕화면 모드=맨 뒤(topmost 해제), 아니면=스크린세이버급 최상단.
+// 창을 z-order 최상단(HWND_TOPMOST)으로 명시 재삽입. focusable:false(non-activating) 상태에선
+// setAlwaysOnTop만으론 작업표시줄(자체 topmost) 위로 안 올라가, 땅 파임 영역이 작업표시줄에 가려진다.
+// SWP_NOACTIVATE로 포커스는 안 뺏으면서 topmost 밴드 맨 위로 재삽입 → 작업표시줄 위로 복귀.
+function pushToTop() {
+  if (process.platform !== 'win32' || !win || win.isDestroyed()) return
+  let hwnd
+  try { const buf = win.getNativeWindowHandle(); hwnd = (buf.length >= 8 ? buf.readBigUInt64LE(0) : BigInt(buf.readUInt32LE(0))).toString() } catch (e) { return }
+  const ps = [
+    'Add-Type -Namespace D -Name Z -MemberDefinition \'[DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr h,System.IntPtr a,int x,int y,int cx,int cy,uint f);\'',
+    `$h=[System.IntPtr]::new([long]${hwnd})`,
+    '$b=[System.IntPtr]::new(-1)',                // HWND_TOPMOST
+    '[D.Z]::SetWindowPos($h,$b,0,0,0,0,0x13)'     // SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE
+  ].join('; ')
+  require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {})
+}
+// 창 레이어 적용: 바탕화면 모드=맨 뒤(topmost 해제), 아니면=스크린세이버급 최상단 + 작업표시줄 위 강제.
 function applyLayer() {
   if (!win || win.isDestroyed()) return
   if (desktopMode) { win.setAlwaysOnTop(false); pushToBottom() }
-  else win.setAlwaysOnTop(true, 'screen-saver')
+  else { win.setAlwaysOnTop(true, 'screen-saver'); pushToTop() }
 }
 // Re-assert the overlay's chrome-free state. Windows re-draws the accent border on the
 // topmost window when ANOTHER window (settings/chat) closes, so call this on those events.

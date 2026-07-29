@@ -583,6 +583,10 @@
   // recent changelog entry (the version just received) — skipped in-between notes are not shown.
   // Add newest versions at the TOP.
   const CHANGELOG = {
+    '0.1.7': [
+      '🔌 멀티 접속 개선 — 서버와 무관한 클라 전용 업데이트는 서버 재시작 없이 접속(프로토콜 버전 분리)',
+      '🕳️ 작업표시줄 땅 파임이 항상 보이도록 z-order 보강',
+    ],
     '0.1.6': [
       '⌨️ 메뉴 입력칸(서버 주소·이름·단축키) 타이핑·복사·붙여넣기 복구',
     ],
@@ -869,6 +873,7 @@
   }
 
   const FIXED_ROOM = 'MAIN'   // 모델2: 서버가 곧 방. 방 코드 없이 서버당 단일 공용 방 — 접속 대상은 서버 IP로만 구분
+  const PROTOCOL_VERSION = 1  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속
   function connect(url) {
     disconnect()
     setStatus('접속 중…')
@@ -876,7 +881,7 @@
     let ws
     try { ws = new WebSocket(url) } catch { setStatus('잘못된 서버 주소'); return }
     net = ws
-    ws.onopen = () => ws.send(JSON.stringify(Object.assign({ t: 'join', room: FIXED_ROOM, v: (inputSource.appVersion || '') }, profileMsg())))   // v=앱 버전(서버 버전 게이트)
+    ws.onopen = () => ws.send(JSON.stringify(Object.assign({ t: 'join', room: FIXED_ROOM, v: (inputSource.appVersion || ''), proto: PROTOCOL_VERSION }, profileMsg())))   // proto=프로토콜 버전(접속 게이트) · v=앱 버전(표시용)
     ws.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(ev.data) } catch { return }
       if (msg.t === 'joined') {

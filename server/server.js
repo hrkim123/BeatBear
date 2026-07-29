@@ -4,7 +4,11 @@ const { WebSocketServer } = require('ws')
 
 const PORT = process.env.PORT || 8787
 const MAX_ROOM_SIZE = 12
-const SERVER_VERSION = process.env.SERVER_VERSION || (() => { try { return require('../package.json').version } catch { return '' } })()   // 클라 버전과 정확히 일치해야 접속 허용(버전 섞임 desync 방지). 런처 exe는 최신 릴리스 태그를 env로 주입
+const SERVER_VERSION = process.env.SERVER_VERSION || (() => { try { return require('../package.json').version } catch { return '' } })()   // 표시·로깅용 앱 버전. 런처 exe는 최신 릴리스 태그를 env로 주입
+// ⭐ 접속 게이트는 앱 버전이 아니라 "프로토콜 버전"으로 판정한다. 서버와 주고받는 메시지 규약(타입·필드·좌표계 등
+// 양쪽이 동일하게 해석해야 하는 것)이 바뀔 때만 이 값을 올린다. 클라 전용(서버 무관) 릴리스는 이 값을 그대로 두어
+// 서버 재시작 없이도 구·신 클라가 함께 접속·플레이할 수 있다. **client(app.js)의 PROTOCOL_VERSION과 항상 일치시킬 것.**
+const PROTOCOL_VERSION = 1
 
 const wss = new WebSocketServer({ port: PORT })
 const rooms = new Map() // code -> Map<id, { ws, name, animal }>
@@ -44,10 +48,11 @@ wss.on('connection', (ws, req) => {
     if (msg.t === 'join' && typeof msg.room === 'string' && !joinedRoom) {
       const code = msg.room.trim().toUpperCase().slice(0, 16)
       if (!code) return
-      // 버전 게이트: 클라 버전이 서버 버전과 정확히 일치하지 않으면 접속 거부(구/신 버전 섞임 방지)
-      if (SERVER_VERSION && String(msg.v || '') !== SERVER_VERSION) {
-        ws.send(JSON.stringify({ t: 'error', reason: 'version_mismatch', sv: SERVER_VERSION, cv: String(msg.v || '') }))
-        console.log(`[join reject] version ${msg.v || '?'} != server ${SERVER_VERSION}`)
+      // 프로토콜 게이트: 앱 버전이 아니라 프로토콜 버전이 일치해야 접속 허용(규약 섞임 방지).
+      // 구 클라(proto 미전송)는 NaN → 거부(업데이트 유도). 클라 전용 릴리스는 proto 동일 → 통과.
+      if (Number(msg.proto) !== PROTOCOL_VERSION) {
+        ws.send(JSON.stringify({ t: 'error', reason: 'version_mismatch', sv: SERVER_VERSION, cv: String(msg.v || ''), sp: PROTOCOL_VERSION, cp: (msg.proto == null ? '' : msg.proto) }))
+        console.log(`[join reject] protocol ${msg.proto == null ? '?' : msg.proto} != server ${PROTOCOL_VERSION} (client app ${msg.v || '?'})`)
         return
       }
       if (!rooms.has(code)) rooms.set(code, new Map())
