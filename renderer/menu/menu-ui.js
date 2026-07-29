@@ -258,6 +258,9 @@
     .hgm-btn.ghost{background:#e2c6b6;color:#7a4b4b}
     .hgm-btn:disabled{opacity:.5;cursor:default}
     .hgm-users{max-height:200px;overflow:auto}
+    .hgm-ubtn{border:none;border-radius:7px;background:#f0cabb;font-size:12px;line-height:1;padding:4px 7px;margin-left:3px;cursor:pointer}
+    .hgm-ubtn.on{background:#d9534f}
+    .hgm-ubtn.kick{background:#e2c6b6}
     .hgm-u{display:flex;align-items:center;gap:8px;padding:7px 6px;border-bottom:1px solid #ecd8c9;font-size:12px}
     .hgm-ava{width:22px;height:22px;border-radius:50%;background:#cdb08d;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff}
     .hgm-uname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -314,13 +317,16 @@
 
   function conveniencePane() {
     const dm = B.getDesktopMode ? !!B.getDesktopMode() : false
+    const dimOn = B.getPeersDim ? !!B.getPeersDim() : false
     const html =
       `<div class="hgm-arow" data-act="clear"><span class="hgm-ai">🧹</span><div><div>소환체 제거</div><div class="hgm-dim">내 소환체·투사체 전부 정리</div></div></div>` +
+      `<div class="hgm-arow" data-act="dim"><span class="hgm-ai">👁️</span><div><div>투명 모드 ${dimOn ? '<b style="color:#5f9e4a">ON</b>' : '<span class="hgm-dim">OFF</span>'}</div><div class="hgm-dim">모든 상대를 투명하게(토글)</div></div></div>` +
       `<div class="hgm-arow" data-act="desk"><span class="hgm-ai">🖼️</span><div><div>뒤로 보내기 ${dm ? '<b style="color:#5f9e4a">ON</b>' : '<span class="hgm-dim">OFF</span>'}</div><div class="hgm-dim">다른 창 뒤로 보내 데스크톱 펫처럼</div></div></div>` +
       `<div class="hgm-arow" data-act="restore"><span class="hgm-ai">🌱</span><div><div>땅 복구</div><div class="hgm-dim">파인 지형 원상복구</div></div></div>`
     return {
       html, wire(pop, rr) {
         pop.querySelector('[data-act="clear"]').onclick = () => { if (B.clearSummons) B.clearSummons() }
+        pop.querySelector('[data-act="dim"]').onclick = () => { if (B.togglePeersDim) B.togglePeersDim(); rr() }
         pop.querySelector('[data-act="desk"]').onclick = () => { if (B.toggleDesktopMode) B.toggleDesktopMode(); rr() }
         pop.querySelector('[data-act="restore"]').onclick = () => { if (B.restoreBar) B.restoreBar() }
       }
@@ -331,20 +337,32 @@
     const conn = B.isConnected ? B.isConnected() : false
     const server = B.getServer ? B.getServer() : 'ws://localhost:8787'
     const roster = (B.getRoster ? B.getRoster() : []) || []
-    const list = roster.length
-      ? roster.map((u) => `<div class="hgm-u"><div class="hgm-ava">${esc((u.name || '?')[0])}</div><div class="hgm-uname">${esc(u.name || '?')}${u.me ? ' <span class="hgm-dim">(나)</span>' : ''}${u.host ? ' 👑' : ''}</div><span class="hgm-dot"></span></div>`).join('')
-      : '<div class="hgm-dim" style="padding:10px 2px">접속 중이 아니거나 접속자가 없어요.</div>'
+    const iAmHost = B.isHost ? !!B.isHost() : false
+    function userRow(u) {
+      const meTag = u.me ? ' <span class="hgm-dim">(나)</span>' : ''
+      const crown = u.host ? ' 👑' : ''
+      let right = '<span class="hgm-dot"></span>'
+      if (iAmHost && !u.me && u.id != null) {   // 호스트만: 상대 무기잠금·강퇴 버튼
+        const locked = B.isPeerLocked ? !!B.isPeerLocked(u.id) : false
+        right = `<button class="hgm-ubtn ${locked ? 'on' : ''}" data-wlock="${u.id}" title="무기·소환체 사용 ${locked ? '잠금됨 — 클릭해 허용' : '허용 — 클릭해 잠금'}">${locked ? '🚫' : '⚔️'}</button>` +
+                `<button class="hgm-ubtn kick" data-kick="${u.id}" title="강퇴">👢</button>`
+      }
+      return `<div class="hgm-u"><div class="hgm-ava">${esc((u.name || '?')[0])}</div><div class="hgm-uname">${esc(u.name || '?')}${meTag}${crown}</div>${right}</div>`
+    }
+    const list = roster.length ? roster.map(userRow).join('') : '<div class="hgm-dim" style="padding:10px 2px">접속 중이 아니거나 접속자가 없어요.</div>'
     const html =
       `<div class="hgm-sec">서버 주소</div>` +
       `<input class="hgm-field" id="hgm-srv" value="${esc(server)}" ${conn ? 'disabled' : ''} placeholder="ws://localhost:8787">` +
       `<div style="display:flex;gap:6px;margin-bottom:12px"><button class="hgm-btn" id="hgm-conn" style="flex:1" ${conn ? 'disabled' : ''}>접속</button><button class="hgm-btn ghost" id="hgm-disc" style="flex:1" ${conn ? '' : 'disabled'}>나가기</button></div>` +
-      `<div class="hgm-sec">이 서버에 접속 중 (${roster.length})</div><div class="hgm-users">${list}</div>` +
+      `<div class="hgm-sec">이 서버에 접속 중 (${roster.length})${iAmHost ? ' · 👑호스트: ⚔️무기잠금/👢강퇴' : ''}</div><div class="hgm-users">${list}</div>` +
       `<div class="hgm-note">서버가 곧 방입니다. 한 명이 서버를 켜고 주소를 공유하면 함께 놀 수 있어요.</div>`
     return {
       html, wire(pop, rr) {
         const c = pop.querySelector('#hgm-conn'), d = pop.querySelector('#hgm-disc'), inp = pop.querySelector('#hgm-srv')
         if (c) c.onclick = () => { const v = inp.value.trim(); if (v && B.connect) { B.connect(v); setTimeout(rr, 350) } }
         if (d) d.onclick = () => { if (B.disconnect) B.disconnect(); setTimeout(rr, 120) }
+        pop.querySelectorAll('[data-wlock]').forEach((b) => b.onclick = () => { if (B.togglePeerLock) B.togglePeerLock(+b.dataset.wlock); rr() })
+        pop.querySelectorAll('[data-kick]').forEach((b) => b.onclick = () => { if (B.kickUser) B.kickUser(+b.dataset.kick); setTimeout(rr, 200) })
       }
     }
   }

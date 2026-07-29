@@ -145,6 +145,11 @@ wss.on('connection', (ws, req) => {
       broadcast(joinedRoom, { t: 'setcur', id, target: msg.target, count: msg.count, gems: msg.gems, mat: msg.mat }, id)   // dev set a user's currency
     } else if (msg.t === 'peace') {
       broadcast(joinedRoom, { t: 'peace', id, on: msg.on }, id)   // dev toggled peace mode (weapons locked for all)
+    } else if (msg.t === 'kick' && isHost) {   // 호스트: 특정 유저 강퇴(연결 종료 → close 핸들러가 roster 자동 갱신)
+      const rk = rooms.get(joinedRoom); const tgt = rk && rk.get(msg.target)
+      if (tgt) { try { tgt.ws.send(JSON.stringify({ t: 'kicked' })) } catch {} ; try { tgt.ws.close() } catch {} ; console.log(`[kick] host ${id} -> ${msg.target}`) }
+    } else if (msg.t === 'wlock' && isHost) {   // 호스트: 특정 유저 무기·소환체 사용 잠금(타깃만 적용)
+      broadcast(joinedRoom, { t: 'wlock', id, target: msg.target, on: msg.on }, id)
     } else if (msg.t === 'hbullets' && Array.isArray(msg.list)) {
       broadcast(joinedRoom, { t: 'hbullets', id, list: msg.list.slice(0, 30) }, id)
     } else if (msg.t === 'bolt') {

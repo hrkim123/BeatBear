@@ -5,3 +5,4 @@ dist-server/
 .DS_Store
 Thumbs.db
 .claude/
+.github/workflows/release.yml

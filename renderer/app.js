@@ -144,6 +144,7 @@
     const res = pool[Math.floor(Math.random() * pool.length)]
     const dup = grantAppear(res.group, res.value)   // saveAppear 포함
     enforceAppearOwnership(true)   // 소비로 미보유가 된 장착 아이템 기본값 복귀 + 전파
+    appearCraftUses++; try { localStorage.setItem('appearCraftUses', String(appearCraftUses)) } catch {} ; if (typeof checkAchievements === 'function') checkAchievements()   // 🏆 꾸미기 조합 이용 업적
     return { ok: true, group: res.group, value: res.value, dup }
   }
   // 🐾 Paw Coin — 외형 소환 전용 재화(무기·소환체 소환은 Grizzle=BattleGacha gems). 개발자는 무제한.
@@ -494,43 +495,46 @@
   const achvEl = document.getElementById('achv')
   const achvListEl = document.getElementById('achv-list')
   let achvOpenFlag = false, achvPos = null
-  // 누적 카운트 업적(티어): 10,000 → 50,000 → 100,000 → 이후 +50,000마다. 보상 = 💎 소환 재화 3.
-  const CUM_ACH_GEMS = 3
-  let cumAchCleared = parseInt(localStorage.getItem('cumAchCleared') || '0', 10) || 0
-  function cumTarget(c) { return c <= 0 ? 10000 : c === 1 ? 50000 : 100000 + (c - 2) * 50000 }
-  // 배틀 업적(티어): 5 → 10 → 20 → 30 → … → 100. 참여/승리 각각. 보상 = 💎5/단계.
-  const BATTLE_ACH_TARGETS = [5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100], BATTLE_ACH_GEMS = 5
-  let battlePlays = parseInt(localStorage.getItem('battlePlays') || '0', 10) || 0
+  // ---- 업적 (단계형) — 각 업적이 여러 단계 목표를 차례로 달성, 단계마다 코인 지급 ----
+  let battlePlays = parseInt(localStorage.getItem('battlePlays') || '0', 10) || 0   // 전적(방 정보용, 업적 아님)
   let battleWins = parseInt(localStorage.getItem('battleWins') || '0', 10) || 0
-  let battlePlayAch = parseInt(localStorage.getItem('battlePlayAch') || '0', 10) || 0
-  let battleWinAch = parseInt(localStorage.getItem('battleWinAch') || '0', 10) || 0
-  function checkTierAch(count, cleared, targets, gems, label) {
-    let c = cleared
-    while (c < targets.length && count >= targets[c]) {
-      if (window.BattleGacha) window.BattleGacha.addGems(gems)
-      showToast(`🏆 ${label} ${targets[c]}회 달성! 💎 +${gems}`); c++
+  function recordBattlePlay() { battlePlays++; localStorage.setItem('battlePlays', String(battlePlays)) }
+  function recordBattleWin() { battleWins++; localStorage.setItem('battleWins', String(battleWins)) }
+  // 조합 사용 횟수(업적 지표) — craftAppear/craftWeapon 성공 시 증가
+  let appearCraftUses = parseInt(localStorage.getItem('appearCraftUses') || '0', 10) || 0
+  let weaponCraftUses = parseInt(localStorage.getItem('weaponCraftUses') || '0', 10) || 0
+  let achvCleared = {}; try { achvCleared = JSON.parse(localStorage.getItem('achvCleared') || '{}') || {} } catch {}   // {업적id: 달성 단계 수}
+  const PAW = 'paw', GRZ = 'grizzle'   // 🐾 파우 코인(외형) / 💎 그리즐 코인(무기·소환체=gems)
+  function grantCoin(kind, n) { if (kind === PAW) addPawCoin(n); else if (window.BattleGacha) window.BattleGacha.addGems(n) }
+  function coinLabel(kind, n) { return (kind === PAW ? '🐾' : '💎') + n }
+  function ownedUnitsWeapons() { return (window.BattleGacha && window.BattleGacha.catalog) ? window.BattleGacha.catalog().filter((e) => e.owned).length : 0 }
+  function ownedAppearCount() { return [...ownedAppear].filter((k) => /^(skin|hat|ear|eye|mouth|hand):/.test(k)).length }
+  function rangeStages(start, step, max) { const a = []; for (let v = start; v <= max; v += step) a.push(v); return a }
+  const CRAFT_STAGES = [5].concat(rangeStages(15, 10, 100))   // 5,15,25,…,95 (첫 5 후 +10, ≤100)
+  const ACHV = [
+    { id: 'cum', icon: '🥁', title: '누적 비트 카운트', metric: () => totalCount, stages: rangeStages(50000, 50000, 5000000), reward: (i) => ({ kind: i % 2 === 0 ? PAW : GRZ, n: 3 }) },   // 5만씩 5백만까지, 파우/그리즐 교대
+    { id: 'collWU', icon: '⚔', title: '무기·소환체 컬렉션', metric: ownedUnitsWeapons, stages: rangeStages(5, 5, 30), reward: () => ({ kind: PAW, n: 3 }) },
+    { id: 'collAp', icon: '🎀', title: '꾸미기 컬렉션', metric: ownedAppearCount, stages: rangeStages(5, 5, 30), reward: () => ({ kind: GRZ, n: 3 }) },
+    { id: 'craftAp', icon: '🛠️', title: '꾸미기 조합 이용', metric: () => appearCraftUses, stages: CRAFT_STAGES.slice(), reward: () => ({ kind: GRZ, n: 3 }) },
+    { id: 'craftWU', icon: '🛠️', title: '무기·소환체 조합 이용', metric: () => weaponCraftUses, stages: CRAFT_STAGES.slice(), reward: () => ({ kind: PAW, n: 3 }) },
+  ]
+  function checkAchievements() {
+    let changed = false
+    for (const a of ACHV) {
+      let c = achvCleared[a.id] || 0
+      const m = a.metric()
+      while (c < a.stages.length && m >= a.stages[c]) { const r = a.reward(c); grantCoin(r.kind, r.n); showToast(`🏆 ${a.title} ${a.stages[c].toLocaleString()} 달성! ${coinLabel(r.kind, r.n)}`); c++; changed = true }
+      if (c !== (achvCleared[a.id] || 0)) achvCleared[a.id] = c
     }
-    return c
+    if (changed) { try { localStorage.setItem('achvCleared', JSON.stringify(achvCleared)) } catch {} ; if (achvOpenFlag) renderAchv(); if (window.HGMenu && window.HGMenu.isOpen()) window.HGMenu.refresh() }
   }
-  function recordBattlePlay() {
-    battlePlays++; localStorage.setItem('battlePlays', String(battlePlays))
-    battlePlayAch = checkTierAch(battlePlays, battlePlayAch, BATTLE_ACH_TARGETS, BATTLE_ACH_GEMS, '배틀 참여'); localStorage.setItem('battlePlayAch', String(battlePlayAch))
-    if (achvOpenFlag) renderAchv()
-  }
-  function recordBattleWin() {
-    battleWins++; localStorage.setItem('battleWins', String(battleWins))
-    battleWinAch = checkTierAch(battleWins, battleWinAch, BATTLE_ACH_TARGETS, BATTLE_ACH_GEMS, '배틀 승리'); localStorage.setItem('battleWinAch', String(battleWinAch))
-    if (achvOpenFlag) renderAchv()
-  }
-  function checkCumAch() {
-    let target = cumTarget(cumAchCleared), gained = 0
-    while (totalCount >= target) {
-      cumAchCleared++; localStorage.setItem('cumAchCleared', String(cumAchCleared)); gained += CUM_ACH_GEMS
-      if (window.BattleGacha) window.BattleGacha.addGems(CUM_ACH_GEMS)
-      showToast(`🏆 누적 ${target.toLocaleString()}회 달성! 💎 소환 재화 +${CUM_ACH_GEMS}`)
-      target = cumTarget(cumAchCleared)
-    }
-    if (gained && achvOpenFlag) renderAchv()
+  function computeAchievements() {
+    return ACHV.map((a) => {
+      const c = achvCleared[a.id] || 0, m = a.metric(), done = c >= a.stages.length
+      const goal = done ? a.stages[a.stages.length - 1] : a.stages[c]
+      const r = a.reward(done ? a.stages.length - 1 : c)
+      return { icon: a.icon, title: a.title, reward: coinLabel(r.kind, r.n), cur: m, goal, cleared: c, done }
+    })
   }
   function achCard(name, reward, desc, cur, target, cleared, done) {
     const pct = done ? 100 : Math.min(100, (cur / target) * 100)
@@ -544,15 +548,7 @@
   function renderAchv() {
     if (!achvListEl) return
     achvListEl.innerHTML = ''
-    // 1) 누적 카운트
-    const t1 = cumTarget(cumAchCleared)
-    achvListEl.appendChild(achCard(`🏆 누적 카운트 ${t1.toLocaleString()}회`, `💎 ${CUM_ACH_GEMS}`, `키보드·마우스 누적 입력 ${t1.toLocaleString()}회 달성 시 소환 재화 지급`, totalCount, t1, cumAchCleared, false))
-    // 2) 배틀 참여
-    const pDone = battlePlayAch >= BATTLE_ACH_TARGETS.length, pT = pDone ? BATTLE_ACH_TARGETS[BATTLE_ACH_TARGETS.length - 1] : BATTLE_ACH_TARGETS[battlePlayAch]
-    achvListEl.appendChild(achCard(`⚔ 배틀 참여 ${pT}회`, `💎 ${BATTLE_ACH_GEMS}`, `배틀 모드 ${pT}회 참여 시 소환 재화 지급 (5·10·20…100)`, battlePlays, pT, battlePlayAch, pDone))
-    // 3) 배틀 승리
-    const wDone = battleWinAch >= BATTLE_ACH_TARGETS.length, wT = wDone ? BATTLE_ACH_TARGETS[BATTLE_ACH_TARGETS.length - 1] : BATTLE_ACH_TARGETS[battleWinAch]
-    achvListEl.appendChild(achCard(`🏆 배틀 승리 ${wT}회`, `💎 ${BATTLE_ACH_GEMS}`, `배틀 모드에서 ${wT}회 승리 시 소환 재화 지급 (5·10·20…100)`, battleWins, wT, battleWinAch, wDone))
+    for (const a of computeAchievements()) achvListEl.appendChild(achCard(`${a.icon} ${a.title} ${a.goal.toLocaleString()}`, a.reward, '', a.cur, a.goal, a.cleared, a.done))
   }
   function positionAchv() {
     if (wx == null || !achvBtn) return
@@ -884,6 +880,8 @@
   // Clears every summon + restores the taskbar, and LOCKS all weapons for everyone (dev included).
   // Broadcast to the room; while on, each character shows a 🕊️ badge so peers know why nothing fires.
   let peaceMode = false
+  let hostWlock = false                 // 호스트가 나를 잠금 → 내 무기·소환체 사용 불가(타깃측 플래그)
+  const lockedPeers = new Set()         // (호스트) 내가 무기·소환체 사용 잠근 상대 id 목록
   const peaceBtn = document.getElementById('btn-peace')
   function clearMySummons() {
     projectiles.length = 0; ants.length = 0; gbullets.length = 0; hbullets.length = 0; bolts.length = 0
@@ -906,6 +904,10 @@
   }
   function togglePeace() { if (!isDev) return; setPeace(!peaceMode, false) }
   if (peaceBtn) peaceBtn.onclick = togglePeace
+  // 호스트 권한: 특정 유저 강퇴 / 무기·소환체 사용 잠금(오버레이)
+  function kickUser(pid) { if (isHost && connected() && net) net.send(JSON.stringify({ t: 'kick', target: pid })) }
+  function setPeerLock(pid, on) { if (!isHost) return; if (on) lockedPeers.add(pid); else lockedPeers.delete(pid); if (connected() && net) net.send(JSON.stringify({ t: 'wlock', target: pid, on: on ? 1 : 0 })) }
+  function togglePeerLock(pid) { setPeerLock(pid, !lockedPeers.has(pid)) }
   function positionPeace() {
     if (wx == null || !peaceBtn) return
     if (!isDev) { peaceBtn.classList.add('hidden'); return }   // developer-only control
@@ -917,8 +919,9 @@
   // fades THAT player's character + weapons on my screen only. (No button on my own cat.)
   const DIM_A = 0.06   // 상대 투명 모드 알파(0.15 → 0.06, 더 투명하게)
   const dimmedPeers = new Set()          // peer ids I've chosen to fade
-  let peerDimBtns = []                   // per-frame [{ pid, x, y, r }] hit targets (also fed to the hotzone)
-  function peerAlpha(pid) { return dimmedPeers.has(pid) ? DIM_A : 1 }
+  let peerDimBtns = []                   // (미사용) 개별 투명 버튼 잔재
+  let allPeersDim = false                // 투명 모드(편의성): 모든 상대 투명 토글 ON/OFF
+  function peerAlpha(pid) { return (allPeersDim || dimmedPeers.has(pid)) ? DIM_A : 1 }
   function toggleDimPeer(pid) { if (dimmedPeers.has(pid)) dimmedPeers.delete(pid); else dimmedPeers.add(pid) }
   function drawPeerDimButtons(now) {
     peerDimBtns = []
@@ -959,7 +962,7 @@
     showToast(me.safeMode ? '🕊️ 평화 모드 — 무적 쉴드 ON (무기 사용 불가)' : '평화 모드 OFF')
     pushState()
   }
-  function weaponsLocked() { return peaceMode || me.safeMode }   // dev whole-room lock OR my personal safe mode
+  function weaponsLocked() { return peaceMode || me.safeMode || hostWlock }   // 평화모드 · 내 안전모드 · 호스트 잠금 중 하나라도면 발사·소환 금지   // dev whole-room lock OR my personal safe mode
   function drawSafeDomes(now) {   // honeycomb dome around me + any peer in safe mode
     for (let i = 0; i < catPos.length; i++) {
       const cat = allRef[i], c = catPos[i]; if (!c) continue
@@ -992,7 +995,7 @@
       penaltyAcc++
       if (penaltyAcc % 2 === 0) { tapCount++; totalCount++; counterDirty = true; floatPenalty() }
     } else { tapCount++; totalCount++; counterDirty = true }
-    renderCounter(); checkCumAch()
+    renderCounter(); checkAchievements()   // 탭 시 카운트·업적 갱신
     if (net && net.readyState === WebSocket.OPEN) {
       const now = performance.now()
       sendBudget = Math.min(25, sendBudget + (now - budgetRefill) * 0.025); budgetRefill = now
@@ -1115,6 +1118,8 @@
       else if (msg.t === 'gift-open') { const g = peerGifts.get(msg.id); if (g && g.state !== 'open') { g.state = 'open'; g.openT = performance.now() } }   // 🎁 소유자 오픈 → 오픈 연출
       else if (msg.t === 'digreset') { resetTaskbarDig(false) }   // someone restored → everyone restores
       else if (msg.t === 'peace') { setPeace(!!msg.on, true) }    // dev toggled peace mode → lock/unlock weapons for me too
+      else if (msg.t === 'wlock') { if (msg.target === me.netId) { hostWlock = !!msg.on; if (hostWlock) clearMySummons(); showToast(hostWlock ? '🚫 호스트가 내 무기·소환체 사용을 잠갔어요' : '✅ 무기·소환체 잠금 해제') } }   // 호스트 per-user 잠금(나만 적용)
+      else if (msg.t === 'kicked') { showToast('⛔ 호스트에 의해 강퇴되었습니다'); disconnect(); setStatus('강퇴됨 — 오프라인') }   // 서버가 내 연결을 닫기 직전 통지
       // ── 멀티 배틀 ── (to === me.netId 만 처리)
       else if (msg.t === 'battle-req') { if (msg.to === me.netId && !battleActive && !battleIncoming && !battleAwaitingGo) { const p = peers.get(msg.id); showBattleInvitePopup(msg.id, (p && p.name) || '상대', msg.bet || null) } else if (msg.to === me.netId && connected()) net.send(JSON.stringify({ t: 'battle-dec', to: msg.id, reason: 'busy' })) }
       else if (msg.t === 'battle-acc') {   // 상대가 내 신청 수락 → 내가 아직 가능하면 확답(battle-go) 후 시작(side0), 아니면 busy 회신(상대 유령 배틀 방지)
@@ -1366,7 +1371,13 @@
       isConnected: () => connected(),
       connect: (url) => connect(url),
       disconnect: () => { disconnect(); setStatus('오프라인 — 혼자 연주 중') },
-      getRoster: () => connected() ? [{ name: me.name || '나', me: true, host: isHost }].concat([...peers.values()].map((p) => ({ name: p.name || ('#' + p.id) }))) : [],
+      getRoster: () => connected() ? [{ name: me.name || '나', me: true, host: isHost }].concat([...peers.values()].map((p) => ({ id: p.id, name: p.name || ('#' + p.id) }))) : [],
+      getPeersDim: () => allPeersDim,
+      togglePeersDim: () => { allPeersDim = !allPeersDim; showToast(allPeersDim ? '👁️ 투명 모드 ON — 모든 상대 투명' : '투명 모드 OFF'); return allPeersDim },
+      isHost: () => isHost,
+      kickUser: (pid) => kickUser(pid),
+      isPeerLocked: (pid) => lockedPeers.has(pid),
+      togglePeerLock: (pid) => togglePeerLock(pid),
       clearSummons: () => { clearMySummons(); showToast('🧹 내 소환체·투사체 전부 제거') },
       getDesktopMode: () => desktopMode,
       toggleDesktopMode: () => { setDesktopMode(!desktopMode); return desktopMode },
@@ -1383,16 +1394,7 @@
       slotUsable: (id) => weaponUsable(id),
       getFps: () => targetFps,
       setFps: (v) => { targetFps = Math.max(20, Math.min(60, v | 0)); try { localStorage.setItem('fps', String(targetFps)) } catch {} },
-      getAchievements: () => {
-        const t1 = cumTarget(cumAchCleared)
-        const pDone = battlePlayAch >= BATTLE_ACH_TARGETS.length, pT = pDone ? BATTLE_ACH_TARGETS[BATTLE_ACH_TARGETS.length - 1] : BATTLE_ACH_TARGETS[battlePlayAch]
-        const wDone = battleWinAch >= BATTLE_ACH_TARGETS.length, wT = wDone ? BATTLE_ACH_TARGETS[BATTLE_ACH_TARGETS.length - 1] : BATTLE_ACH_TARGETS[battleWinAch]
-        return [
-          { icon: '🏆', title: `누적 카운트 ${t1.toLocaleString()}회`, reward: `💎${CUM_ACH_GEMS}`, cur: totalCount, goal: t1, cleared: cumAchCleared, done: false },
-          { icon: '⚔', title: `배틀 참여 ${pT}회`, reward: `💎${BATTLE_ACH_GEMS}`, cur: battlePlays, goal: pT, cleared: battlePlayAch, done: pDone },
-          { icon: '🏆', title: `배틀 승리 ${wT}회`, reward: `💎${BATTLE_ACH_GEMS}`, cur: battleWins, goal: wT, cleared: battleWinAch, done: wDone },
-        ]
-      },
+      getAchievements: () => { checkAchievements(); return computeAchievements() },
       // 꾸미기(캐릭터 외형) — 스킨/모자/부위 모양/책상·키보드·마우스. 변경 시 즉시 반영 + 멀티 전파(sendUpdate).
       getAppearance: () => ({ skin: me.skin, hat: me.hat, shape: Object.assign({}, me.shape), deskStyle: me.deskStyle, kbStyle: me.kbStyle, mouseStyle: me.mouseStyle }),
       hatOwned: (h) => isDev || isHatOwned(h),   // 개발자는 가챠 없이 전부 사용
@@ -1404,7 +1406,7 @@
         return G.catalog().filter((e) => (e.count || 0) > 0).map((e) => ({ id: e.id, name: e.name || e.id, rarity: e.rarity, color: (e.rarityInfo || {}).color || '#c9a074', count: e.count }))
       },
       craftAppear: (picks) => craftAppear(picks),
-      craftWeapon: (ids) => window.BattleGacha ? window.BattleGacha.craftWeapon(ids) : { ok: false, reason: 'no' },
+      craftWeapon: (ids) => { const r = window.BattleGacha ? window.BattleGacha.craftWeapon(ids) : { ok: false, reason: 'no' }; if (r && r.ok) { weaponCraftUses++; try { localStorage.setItem('weaponCraftUses', String(weaponCraftUses)) } catch {} ; checkAchievements() } return r },   // 🏆 무기·소환체 조합 이용 업적
       setSkin: (id) => { if (!Object.prototype.hasOwnProperty.call(window.AnimalArt.SKINS, id)) return; me.skin = id; me.tint = id; localStorage.setItem('skin', id); sendUpdate(); pushState() },
       setHat: (id) => { const h = (isDev || isHatOwned(id)) ? id : 'none'; me.hat = h; localStorage.setItem('hat', h); sendUpdate(); pushState() },
       setShape: (key, val) => { if (!SHAPE_KEYS.includes(key)) return; me.shape[key] = val; localStorage.setItem('catShape', JSON.stringify(me.shape)); sendUpdate() },
@@ -6689,8 +6691,7 @@
   let lastHzSend = 0, catRegenAt = 0
   function sendHotzone() {
     if (wx == null) return
-    const extra = peerDimBtns.map((b) => ({ x: b.x - b.r - 2, y: b.y - b.r - 2, w: (b.r + 2) * 2, h: (b.r + 2) * 2 }))
-      .concat(giftHits.map((h) => ({ x: h.x - h.r - 3, y: h.y - h.r - 3, w: (h.r + 3) * 2, h: (h.r + 3) * 2 })))   // 🎁 상자 클릭영역(상대 상자 포함)
+    const extra = giftHits.map((h) => ({ x: h.x - h.r - 3, y: h.y - h.r - 3, w: (h.r + 3) * 2, h: (h.r + 3) * 2 }))   // 🎁 상자 클릭영역(상대 상자 포함)
     const exclusive = battleActive || platformMode   // 배틀/플랫폼 = 독점 입력(다른 기능·바탕화면 클릭 전부 차단)
     // 독점 모드에선 rect를 화면 전체로 → 커서가 어디에 있든 오버레이가 클릭을 잡아 바탕화면/파일 통과 차단(force와 이중 안전)
     const rect = exclusive ? { x: 0, y: 0, w: canvas.clientWidth, h: canvas.clientHeight } : { x: wx, y: wy, w: cellPxW, h: cellPxH + BAR_SPACE }
@@ -6712,8 +6713,6 @@
 
   // drag the cat (canvas) to move the whole widget — but not while editing
   canvas.addEventListener('mousedown', (e) => {
-    const pb = hitPeerDimButton(e.clientX, e.clientY)   // 👁 clicked an opponent's fade button?
-    if (pb) { toggleDimPeer(pb.pid); e.preventDefault(); return }
     const gh = hitGift(e.clientX, e.clientY)   // 🎁 clicked a gift box? (내 것=바로 오픈 / 상대 것=대신 클릭→소유자 획득)
     if (gh) { if (gh.owner === 'me') claimGift(); else requestPeerGift(gh.owner); e.preventDefault(); return }
     if (editing || wx == null) return
@@ -7011,7 +7010,7 @@
     stepLightning(now)
     drawBhDust(now)
     drawSafeDomes(now)    // 🕊️ invincible peace-mode honeycomb dome (me + safe peers)
-    drawPeerDimButtons(now)   // 👁 per-opponent fade buttons
+    // 개별 투명 버튼 제거 — 편의성의 "투명 모드"(전원 투명 토글)로 대체
     if (peaceMode) drawPeaceBadges(now)   // 🔒 badge above every character while the room is weapon-locked
     if (now - lastHzSend > 180) { lastHzSend = now; sendHotzone() }   // keep the per-peer button click-zones tracking moving peers
     ctx = stagectx
