@@ -1,7 +1,7 @@
 {
   "name": "beatbear",
   "productName": "BeatBear",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "BeatBear — a full-screen desktop overlay where a cute bear taps along with your keyboard and mouse, with multiplayer rooms and cursor-homing missiles",
   "main": "main.js",
   "author": "hrkim",
