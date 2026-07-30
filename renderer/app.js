@@ -2523,9 +2523,12 @@
     let groundD = Infinity
     if (dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s) groundD = gd } }
     let hitD = Infinity, hitApply = null
-    const consider = (tx, ty, apply) => { const t = (tx - ox) * dx + (ty - oy) * dy; if (t < 10 * s || t > maxLen) return; const px = ox + dx * t, py = oy + dy * t; if (Math.hypot(tx - px, ty - py) <= rad && t < hitD) { hitD = t; hitApply = apply } }
-    for (const a of ants) { if (a.dead || a.falling) continue; consider(a.x, a.y - 6 * s, () => { antTakeDmg(a, dps); if (a.dead) addAntKill() }) }
-    for (const [pid, rec] of remoteAnts) for (const a of rec.items.values()) { if (a.dead) continue; const sp = remoteAntScreenPos(pid, a); if (sp) consider(sp.x, sp.y, () => { if (connected()) net.send(JSON.stringify({ t: 'ant-hit', target: pid, ant: a.id, dmg: dps })) }) }
+    // extraR = 표적 자체 크기(스프라이트 소환체는 큼) → 얇은 빔에도 지상 유닛이 제대로 맞음
+    const consider = (tx, ty, apply, extraR) => { const t = (tx - ox) * dx + (ty - oy) * dy; if (t < 10 * s || t > maxLen) return; const px = ox + dx * t, py = oy + dy * t; if (Math.hypot(tx - px, ty - py) <= rad + (extraR || 0) && t < hitD) { hitD = t; hitApply = apply } }
+    // 지상 유닛은 "발밑 점"이 아니라 몸통 전체(캡슐)로 판정 — 손 높이로 지나가는 빔이 스쳐 지나가지 않게
+    const bodyH = (sz) => (16 + 12 * (sz || 1)) * s
+    for (const a of ants) { if (a.dead || a.falling) continue; const bh = bodyH(a.size); consider(a.x, a.y - bh * 0.5, () => { antTakeDmg(a, dps); if (a.dead) addAntKill() }, bh * 0.5 + 6 * s) }
+    for (const [pid, rec] of remoteAnts) { if (now - rec.ts > 800) continue; for (const a of rec.items.values()) { if (a.dead) continue; const sp = remoteAntScreenPos(pid, a); if (!sp) continue; const bh = bodyH(a.sz); consider(sp.x, sp.y - bh * 0.5, () => { if (connected()) net.send(JSON.stringify({ t: 'ant-hit', target: pid, ant: a.id, dmg: dps })) }, bh * 0.5 + 6 * s) } }
     for (const [pid, g] of remoteGatlings) consider(g.nx * W, g.ny * H, () => { if (connected()) net.send(JSON.stringify({ t: 'gat-hit', target: pid, dmg: dps })) })
     for (const [pid, m] of remoteMechas) consider(m.nx * W, m.ny * H - 26 * mechaScale(), () => { if (connected()) net.send(JSON.stringify({ t: 'mecha-hit', target: pid, dmg: dps })) })
     for (const [pid, h] of remoteHumans) consider(h.nx * W, h.ny * H - 20 * s, () => { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: dps, hx: +(h.nx).toFixed(4), hy: +(h.ny).toFixed(4) })) })
@@ -2588,7 +2591,50 @@
         if (Math.floor(now / 70) % 2 === 0) spawnDebris(ex, tb.top + 3, 2, '#3a3a42')
       }
     }
+    zapAlongBeam(ox, oy, dx, dy, rad, len, now, true)   // 🐉 빔에 닿은 투사체는 그 자리서 전부 소멸(빔은 안 막힘)
     return { len, ex, ey, blocked: isGround || (hitApply && hitD <= len + 1) || (shieldHit && shieldD <= len + 0.5) }
+  }
+  // 빔 선분에 닿은 투사체 소멸. 내 빔이면 relayRemote=true(상대 투사체는 col-dmg로),
+  // 상대 빔이면 false — 각 클라가 "자기 투사체"를 같은 규칙으로 지우므로 id 없는 투사체(폭탄·나방 낙하·핵 등)도 양쪽이 일치한다.
+  function zapAlongBeam(ox, oy, dx, dy, rad, len, now, relayRemote) {
+    const s = view.scale, W = canvas.clientWidth, H = canvas.clientHeight
+    const onBeam = (tx, ty, extra) => { const t = (tx - ox) * dx + (ty - oy) * dy; if (t < 6 * s || t > len) return false; const px = ox + dx * t, py = oy + dy * t; return Math.hypot(tx - px, ty - py) <= rad + (extra || 0) }
+    const zap = (arr, chan, idKey) => {
+      for (let k = arr.length - 1; k >= 0; k--) {
+        const q = arr[k]; if (!q || !onBeam(q.x, q.y, 4 * s)) continue
+        addEffect(q.x, q.y, 1); spawnSpark(q.x, q.y); if (idKey) bcBoom(chan, q[idKey], q.x, q.y, q.power || 1); arr.splice(k, 1)
+      }
+    }
+    zap(projectiles, 'missile', 'mid'); zap(hbullets, 'hbullet', 'id'); zap(gbullets, 'gbullet', 'id')
+    zap(mechaShells, 'mshell', 'id'); zap(energyShots, 'mshell', 'id'); zap(interceptors, 'mshell', 'id')
+    zap(summonProj, null, null); zap(overlayIntc, null, null)                    // 소환체 투사체 · 대공포 요격(각자 시뮬 → 각 클라가 자기 것 소멸)
+    zap(bombs, null, null); zap(overlayMothFalls, null, null); zap(littleBoys, null, null)   // 낙하 폭탄 · 나방 낙하 · ☢ 낙하 핵
+    if (!relayRemote) zap(kiballs, null, null)                                   // 상대 빔에 닿은 내 기 구체
+    if (relayRemote) {   // 내 빔 → 상대 소유 투사체는 col-dmg로 소멸(양쪽 동일 결과)
+      const zapRemote = (map, kind, ttl) => {
+        for (const [pid, rec] of map) {
+          if (now - rec.ts > ttl) continue
+          for (const it of rec.items.values()) if (onBeam(it.sx * W, it.sy * H, 4 * s)) {
+            if (connected()) net.send(JSON.stringify({ t: 'col-dmg', target: pid, kind, eid: it.id, dmg: 99 }))
+            addEffect(it.sx * W, it.sy * H, 1); spawnSpark(it.sx * W, it.sy * H)
+          }
+        }
+      }
+      zapRemote(remoteMissiles, 'missile', 500); zapRemote(remoteGBullets, 'gbullet', 400)
+      zapRemote(remoteHbullets, 'hbullet', 400); zapRemote(remoteMShells, 'mshell', 400)
+    }
+  }
+  function stepRemoteBeamZap(now) {   // 상대 빔이 내 투사체를 지움(같은 규칙 → 상대 화면과 일치)
+    if (!remoteBeams.size) return
+    const s = view.scale, W = canvas.clientWidth, H = canvas.clientHeight, maxD = Math.hypot(W, H)
+    for (const [pid, rb] of remoteBeams) {
+      if (now - rb.ts > 500) continue
+      const ox = rb.nx * W, oy = rb.ny * H, dx = Math.cos(rb.ang), dy = Math.sin(rb.ang)
+      let len = maxD
+      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) len = Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy)
+      else if (dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) len = gd } }
+      zapAlongBeam(ox, oy, dx, dy, BEAM_W[(rb.st || 1) - 1] * s * 1.5, len, now, false)
+    }
   }
   function stepBeam(now) {
     if (!me.beam) { _beamClash = null; return }
@@ -3507,20 +3553,25 @@
   // Homes onto ANY fired projectile across the WHOLE overlay (mine or an opponent's): missiles,
   // gatling bullets, adogen/waves, ant-cannon shells, energy pods — everything but characters.
   // Enemy collidables are damaged via a unified `col-dmg` relay so both sides vanish correctly.
-  function nearestInterceptTarget(x, y) {
+  function nearestInterceptTarget(x, y, chars) {   // chars=true → 캐릭터(상대 인간·곰)까지 표적에 포함(🐉 SSJ R). 메카 요격은 기존대로 투사체/유닛만.
     let best = null, bd = Infinity   // whole-screen homing
     const consider = (tx, ty, hit) => { const d = Math.hypot(tx - x, ty - y); if (d < bd) { bd = d; best = { x: tx, y: ty, hit } } }
     const now = performance.now(), W = canvas.clientWidth, H = canvas.clientHeight
     const cd = (pid, kind, eid) => { if (connected()) net.send(JSON.stringify({ t: 'col-dmg', target: pid, kind, eid, dmg: INT_DMG })) }
     for (const pr of projectiles) consider(pr.x, pr.y, () => { const j = projectiles.indexOf(pr); if (j >= 0) { addEffect(pr.x, pr.y, 1); if ((pr.power || 1) > INT_DMG) pr.power -= INT_DMG; else projectiles.splice(j, 1) } })
-    for (const a of ants) if (!a.dead && !a.falling) consider(a.x, a.y, () => antTakeDmg(a, INT_DMG))
-    for (const [pid, rec] of remoteAnts) { if (now - rec.ts > 800) continue; for (const a of rec.items.values()) { if (a.dead) continue; const sp = remoteAntScreenPos(pid, a); if (sp) consider(sp.x, sp.y, () => { if (connected()) net.send(JSON.stringify({ t: 'ant-hit', target: pid, ant: a.id, dmg: INT_DMG })) }) } }
+    const bodyMid = (sz) => (8 + 6 * (sz || 1)) * view.scale   // 발밑이 아니라 몸통 중심을 노림(바닥에 먼저 처박히지 않게)
+    for (const a of ants) if (!a.dead && !a.falling) consider(a.x, a.y - bodyMid(a.size), () => antTakeDmg(a, INT_DMG))
+    for (const [pid, rec] of remoteAnts) { if (now - rec.ts > 800) continue; for (const a of rec.items.values()) { if (a.dead) continue; const sp = remoteAntScreenPos(pid, a); if (sp) consider(sp.x, sp.y - bodyMid(a.sz), () => { if (connected()) net.send(JSON.stringify({ t: 'ant-hit', target: pid, ant: a.id, dmg: INT_DMG })) }) } }
     for (const [pid, g] of remoteGatlings) consider(g.nx * W, g.ny * H, () => { if (connected()) net.send(JSON.stringify({ t: 'gat-hit', target: pid, dmg: INT_DMG })) })
     for (const [pid, m] of remoteMechas) consider(m.nx * W, m.ny * H - 26 * mechaScale(), () => { if (connected()) net.send(JSON.stringify({ t: 'mecha-hit', target: pid, dmg: INT_DMG })) })
     for (const [pid, rec] of remoteMissiles) { if (now - rec.ts > 500) continue; for (const it of rec.items.values()) consider(it.sx * W, it.sy * H, () => cd(pid, 'missile', it.id)) }
     for (const [pid, rec] of remoteGBullets) { if (now - rec.ts > 400) continue; for (const it of rec.items.values()) consider(it.sx * W, it.sy * H, () => cd(pid, 'gbullet', it.id)) }
     for (const [pid, rec] of remoteHbullets) { if (now - rec.ts > 400) continue; for (const it of rec.items.values()) consider(it.sx * W, it.sy * H, () => cd(pid, 'hbullet', it.id)) }
     for (const [pid, rec] of remoteMShells) { if (now - rec.ts > 400) continue; for (const it of rec.items.values()) consider(it.sx * W, it.sy * H, () => cd(pid, 'mshell', it.id)) }
+    if (chars) {   // 🐉 상대 인간 + 곰(내 곰 포함 — 혼자서도 테스트 가능). 내 인간은 자기 손에서 나가므로 제외.
+      for (const [pid, h] of remoteHumans) consider(h.nx * W, h.ny * H - 20 * view.scale, () => { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: INT_DMG, hx: +(h.nx).toFixed(4), hy: +(h.ny).toFixed(4) })) })
+      for (let ci = 0; ci < catPos.length; ci++) { const cat = allRef[ci], c = catPos[ci]; if (!cat || !c) continue; consider(c.x, c.y - 12 * view.scale, () => { if (!catShieldCovers(cat, c, c.x, c.y - 12 * view.scale, now)) applyCatHit(cat, INT_DMG, now) }) }
+    }
     return best
   }
   function stepInterceptors(now) {
@@ -3571,11 +3622,28 @@
       const p = kiballs[i]
       if (now - p.born > p.life) { kiballs.splice(i, 1); continue }
       { const bh = blackholePull(p, now); if (bh) { spawnDustToHole(p.x, p.y, bh); kiballs.splice(i, 1); continue } }
-      if (now >= p.homeAt) {   // 직진 구간 후 유도
-        const tg = nearestInterceptTarget(p.x, p.y)
-        if (tg) { const dx = tg.x - p.x, dy = tg.y - p.y, d = Math.hypot(dx, dy) || 1; p.vx += ((dx / d) * p.spd - p.vx) * 0.16; p.vy += ((dy / d) * p.spd - p.vy) * 0.16; if (d < 15 * s) { tg.hit(); addEffect(p.x, p.y, 1); spawnSpark(p.x, p.y); kiballs.splice(i, 1); continue } }
-      }
+      const tg = nearestInterceptTarget(p.x, p.y, true)   // 캐릭터 포함
+      if (tg && now >= p.homeAt) { const dx = tg.x - p.x, dy = tg.y - p.y, d = Math.hypot(dx, dy) || 1; p.vx += ((dx / d) * p.spd - p.vx) * 0.16; p.vy += ((dy / d) * p.spd - p.vy) * 0.16 }   // 직진 구간 후 유도
+      const px0 = p.x, py0 = p.y
       p.x += p.vx; p.y += p.vy
+      const hitR = Math.max(16 * s, Math.hypot(p.vx, p.vy) * 0.75)   // 고속이라 이동 선분 기준 스윕 판정
+      { // 🐉 상대 기 구체와 정면 충돌 → 서로 상쇄(양쪽 클라가 각자 자기 것을 터뜨림 = 동일 결과)
+        let clashed = false
+        for (const [pid, rk] of remoteKiballs) {
+          if (now - rk.ts > 400) continue
+          for (const rb of rk.list) {
+            const rx = rb.nx * W, ry = rb.ny * H
+            if (distToSeg(rx, ry, { x: px0, y: py0 }, { x: p.x, y: p.y }) <= hitR + 10 * s) {
+              const mx = (px0 + rx) / 2, my = (py0 + ry) / 2
+              addEffect(mx, my, 2); spawnSpark(mx, my); spawnSpark(mx + 6 * s, my - 4 * s)
+              kiballs.splice(i, 1); clashed = true; break
+            }
+          }
+          if (clashed) break
+        }
+        if (clashed) continue
+      }
+      if (tg && distToSeg(tg.x, tg.y, { x: px0, y: py0 }, { x: p.x, y: p.y }) <= hitR) { tg.hit(); addEffect(tg.x, tg.y, 1); spawnSpark(tg.x, tg.y); kiballs.splice(i, 1); continue }
       if (inTaskbar(p.x, p.y)) { carveTaskbar(p.x, 0.5, true); spawnSpark(p.x, p.y); addEffect(p.x, p.y, 1); kiballs.splice(i, 1); continue }
       if (p.x < -40 || p.x > W + 40 || p.y < -80 || p.y > H + 40) { kiballs.splice(i, 1); continue }
       drawKiBall(p, now)
@@ -7664,6 +7732,7 @@
     stepHuman(now)
     stepDevFakeBeam(now)
     stepBeam(now)
+    if (!battleActive) stepRemoteBeamZap(now)   // 🐉 상대 빔이 내 투사체를 지움(멀티 일관)
     stepMechaMerge(now)
     stepMecha(now)
     stepMechaShells(now)
