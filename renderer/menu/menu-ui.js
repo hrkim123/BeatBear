@@ -431,7 +431,7 @@
         if (modBtn) modBtn.onclick = () => {
           modBtn.textContent = '…'
           if (B.setFocusable) B.setFocusable(true)   // 키 입력 캡처엔 창 포커스 필요(캡처 동안만)
-          const onk = (e) => { e.preventDefault(); e.stopPropagation(); window.removeEventListener('keydown', onk, true); if (B.setFocusable) B.setFocusable(false); const name = modKeyName(e); if (name) setMod(name); else rr() }
+          const onk = (e) => { e.preventDefault(); e.stopPropagation(); window.removeEventListener('keydown', onk, true); if (B.setFocusable) B.setFocusable(!!root); const name = modKeyName(e); if (name) setMod(name); else rr() }
           window.addEventListener('keydown', onk, true)
         }
         pop.querySelectorAll('.hgm-keycap[data-slot]').forEach((btn) => {
@@ -440,7 +440,7 @@
             if (B.setFocusable) B.setFocusable(true)   // 키 입력 캡처엔 창 포커스 필요(캡처 동안만)
             const onk = (e) => {
               e.preventDefault(); e.stopPropagation()
-              window.removeEventListener('keydown', onk, true); if (B.setFocusable) B.setFocusable(false)
+              window.removeEventListener('keydown', onk, true); if (B.setFocusable) B.setFocusable(!!root)   // 메뉴 열려 있으면 유지(입력칸 타이핑 가능)
               const name = keyName(e)
               if (name) { const keys = kb.keys.slice(); keys[slot] = name; if (B.setKeybinds) B.setKeybinds({ mod: kb.mod, keys }) }
               rr()
@@ -969,11 +969,9 @@
     document.body.appendChild(root)
     render(curPop); position(curPop, anchor)
     onKey.active = true; hostSync()
-    // 깜빡임 방지: 메뉴 열림만으론 오버레이를 focusable로 만들지 않음(일반 클릭/바깥클릭 시 창 활성화→재blend 깜빡임 없앰).
-    //   텍스트 입력칸이 "실제로 포커스"될 때만 focusable 켜서 타이핑 가능하게 한다. (단축키 캡처는 keysPane에서 별도 토글.)
-    const isField = (el) => !!(el && ((el.tagName === 'INPUT' && el.type !== 'range') || el.tagName === 'TEXTAREA' || el.isContentEditable))
-    root.addEventListener('focusin', (e) => { if (isField(e.target) && B.setFocusable) B.setFocusable(true) })
-    root.addEventListener('focusout', () => setTimeout(() => { if (root && !isField(document.activeElement) && B.setFocusable) B.setFocusable(false) }, 0))
+    // 메뉴가 열려 있는 동안만 포커스 허용(입력칸 타이핑·붙여넣기). 열 때 1회 켜고 close()에서 끈다.
+    // (클릭 시점마다 토글하면 focus/blur가 반복되며 오버레이가 심하게 깜빡인다 — 하지 말 것)
+    if (B.setFocusable) B.setFocusable(true)
   }
   function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; if (B.setFocusable) B.setFocusable(false); hostSync() }   // 메뉴 닫힘: focusable 확실히 해제
   function refresh() { if (root && curPop) render(curPop) }   // 로스터 등 변화 시 앱이 호출

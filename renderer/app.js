@@ -2706,12 +2706,29 @@
         _beamClash = null; return null
       }
       out = { type: 'headon', lenM, cx, cy, ox0: mox, oy0: moy, strM, strF, n: foes.length + allies.length + 1, cut: foes.map((f) => f.R).concat(allies.map((a) => a.R)) }
-    } else if (allies.length) {   // 같은 방향 → 합류점에서 하나의 거대 빔으로 합체
+    } else if (allies.length) {   // 같은 방향 → 두 빔이 "실제로 교차하는 지점"에서 합체(원점 평균이 아님)
       me.beamClashFrac = null
-      let sx = mox, sy = moy, vx = Math.cos(b.ang), vy = Math.sin(b.ang), stMax = b.st
-      for (const a of allies) { sx += a.rox; sy += a.roy; vx += Math.cos(a.R.ang); vy += Math.sin(a.R.ang); stMax = Math.max(stMax, a.R.st || 1) }
-      const n = allies.length + 1, cx = sx / n, cy = sy / n
-      out = { type: 'merge', lenM: Math.hypot(cx - mox, cy - moy), cx, cy, ox0: mox, oy0: moy, mergeAng: Math.atan2(vy, vx), mergeSt: Math.min(3, stMax), wMul: 1 + 0.45 * allies.length + 0.12 * (strM - b.st), n, cut: allies.map((a) => a.R) }
+      const maxDist = Math.hypot(W, H), minT = 12 * view.scale
+      let bestT = Infinity
+      for (const a of allies) {   // 광선-광선 교차: mo + t*md = ro + u*rd
+        const rdx = Math.cos(a.R.ang), rdy = Math.sin(a.R.ang)
+        const den = mdx * rdy - mdy * rdx
+        if (Math.abs(den) < 1e-4) continue                       // 평행 → 교차 없음
+        const ex2 = a.rox - mox, ey2 = a.roy - moy
+        const t = (ex2 * rdy - ey2 * rdx) / den                  // 내 빔에서의 거리
+        const u = (ex2 * mdy - ey2 * mdx) / den                  // 상대 빔에서의 거리(둘 다 앞쪽이어야 진짜 교차)
+        if (!(t > minT && u > minT && t < maxDist)) continue
+        a.t = t
+        if (t < bestT) bestT = t
+      }
+      const chosen = allies.filter((a) => a.t != null && Math.abs(a.t - bestT) < 60 * view.scale)   // 같은 교차점에서 만나는 것들만
+      if (chosen.length) {
+        let vx = mdx, vy = mdy, stMax = b.st
+        for (const a of chosen) { vx += Math.cos(a.R.ang); vy += Math.sin(a.R.ang); stMax = Math.max(stMax, a.R.st || 1) }
+        const cx = mox + mdx * bestT, cy = moy + mdy * bestT
+        const strC = b.st + chosen.reduce((n2, a) => n2 + (a.R.st || 1), 0)
+        out = { type: 'merge', lenM: bestT, cx, cy, ox0: mox, oy0: moy, mergeAng: Math.atan2(vy, vx), mergeSt: Math.min(3, stMax), wMul: 1 + 0.45 * chosen.length + 0.12 * (strC - b.st), n: chosen.length + 1, cut: chosen.map((a) => a.R) }
+      }
     } else me.beamClashFrac = null
     _beamClash = out
     return out
