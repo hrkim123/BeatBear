@@ -50,7 +50,6 @@
   const remoteGBullets = new Map()    // peerId -> { items: Map, ts }
   const remoteHumans = new Map()      // peerId -> { nx, ny, hp, weapon, face, ssj, wk, fly, frot, fmov, pk, pang, ocb, oamt, ost }
   const remoteBeams = new Map()       // 🐉 peerId -> { nx, ny, ang, st, ts }  카메하메파
-  let devFakeBeam = null              // 🛠 dev 전용 가짜 상대 빔('headon'|'merge') — 빔 대치 솔로 테스트
   const remoteKiballs = new Map()     // 🐉 peerId -> { list:[{nx,ny}], ts }  유도 에네르기파
   const remoteHbullets = new Map()    // peerId -> { items: Map, ts }  (human bullets/검기/아도겐)
   let hbId = 1
@@ -876,9 +875,9 @@
   function connected() { return !!(net && net.readyState === WebSocket.OPEN) }
   // When the OWNER destroys one of its projectiles, tell everyone so peers remove the copy AND show
   // the SAME explosion at the SAME spot immediately (no inferring removal from a silent position list).
-  function bcBoom(chan, id, x, y, power) {
+  function bcBoom(chan, id, x, y, power, small) {   // small=1 → 상대도 스파크만(총알 등 소형 소멸 — 폭발 연출 누적 방지)
     if (id == null || !connected() || !net) return
-    net.send(JSON.stringify({ t: 'boom', chan, eid: id, nx: +(x / canvas.clientWidth).toFixed(4), ny: +(y / canvas.clientHeight).toFixed(4), pw: power || 1 }))
+    net.send(JSON.stringify({ t: 'boom', chan, eid: id, nx: +(x / canvas.clientWidth).toFixed(4), ny: +(y / canvas.clientHeight).toFixed(4), pw: power || 1, sm: small ? 1 : 0 }))
   }
 
   function profileMsg() {
@@ -886,7 +885,7 @@
   }
 
   const FIXED_ROOM = 'MAIN'   // 모델2: 서버가 곧 방. 방 코드 없이 서버당 단일 공용 방 — 접속 대상은 서버 IP로만 구분
-  const PROTOCOL_VERSION = 3  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속. (3: SSJ 시각 동기화 beam/kiballs+human 확장)
+  const PROTOCOL_VERSION = 4  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속. (4: beam에 len/blk 추가 — 빔 막힘 지점 양쪽 일치)
   function connect(url) {
     disconnect()
     setStatus('접속 중…')
@@ -1052,7 +1051,7 @@
         else { remoteHumans.delete(msg.id); remoteBeams.delete(msg.id); remoteKiballs.delete(msg.id) }
       }
       else if (msg.t === 'beam') {   // 🐉 상대 카메하메파
-        if (msg.on) remoteBeams.set(msg.id, { nx: msg.nx, ny: msg.ny, ang: +msg.ang || 0, st: msg.st || 1, ts: performance.now() })
+        if (msg.on) remoteBeams.set(msg.id, { nx: msg.nx, ny: msg.ny, ang: +msg.ang || 0, st: msg.st || 1, len: (msg.len != null ? +msg.len : null), blk: msg.blk || 0, ts: performance.now() })
         else remoteBeams.delete(msg.id)
       }
       else if (msg.t === 'kiballs') { if (msg.list && msg.list.length) remoteKiballs.set(msg.id, { list: msg.list, ts: performance.now() }); else remoteKiballs.delete(msg.id) }
@@ -1106,7 +1105,8 @@
         const W = canvas.clientWidth, H = canvas.clientHeight
         const map = { missile: remoteMissiles, gbullet: remoteGBullets, hbullet: remoteHbullets, mshell: remoteMShells }[msg.chan]
         if (map) { const rec = map.get(msg.id); if (rec && rec.items) rec.items.delete(msg.eid) }
-        addEffect(msg.nx * W, msg.ny * H, msg.pw || 1); spawnSpark(msg.nx * W, msg.ny * H)
+        spawnSpark(msg.nx * W, msg.ny * H)
+        if (!msg.sm) addEffect(msg.nx * W, msg.ny * H, msg.pw || 1)   // sm=소형(총알 등) → 스파크만
       }
       else if (msg.t === 'littleboy') { const lx = msg.nx * canvas.clientWidth, ly = msg.ny * canvas.clientHeight; if (!littleBoys.some((b) => Math.hypot(b.x - lx, b.y - ly) < 90 * view.scale)) spawnLittleBoy(lx, ly, false) }   // 상대 리틀보이(연출만) — 근처 중복이면 생략
       else if (msg.t === 'hbullets') { mergeRemote(remoteHbullets, msg.id, msg.list, 'nx', 'ny') }
@@ -1412,7 +1412,6 @@
             else if (me.mechaActive) { me.mechaCharging = true; me.mechaChargeStart = performance.now(); me.mechaCharge = 0 }   // mecha cannon / energy charge
             else if (!me.gatActive && antMax() >= 10 && ants.filter((a) => !a.dead && !a.falling && !a.sprite).length >= 10) mergeAntsToMecha()   // 기본 개미(스프라이트 아님) 10마리일 때만 합체
           } else if (msg.key === 'w' && me.humanActive && me.ssj && !me.humanGround && !me.humanFlying) { me.humanFlying = true; me.flyAfter = []; me.flyRot = 0; me.flyMoving = false }   // 🐉 점프 후 공중에서 W → 비행 진입(직립 시작)
-          else if ((msg.key === 'g' || msg.key === 'h') && me.humanActive && window.beatbear && window.beatbear.isDev) { const m = msg.key === 'g' ? 'headon' : 'merge'; devFakeBeam = devFakeBeam === m ? null : m }   // 🛠 dev: 가짜 상대 빔 토글(g=정면, h=합체)
           else if (msg.key === 'r' && me.humanActive && me.ssj && !weaponsLocked()) fireKiHoming(performance.now())   // 🐉 SSJ R: 유도 에네르기파 2발
           else if (msg.key === 'r' && !weaponsLocked() && me.mechaActive && (me.mechaForm || 0) >= 0.5 && !me.mechaTransforming) fireInterceptors(performance.now())   // human-form R: interceptors
         }
@@ -2094,6 +2093,16 @@
     rifle:   { name: '🎯 라이플', price: 30000, emoji: '🎯', speed: 19, dmg: 2, cd: 150, life: 1100 },
     bazooka: { name: '🚀 바주카', price: 50000, emoji: '🚀', power: 3, cd: 800 }
   }
+  // 인간 히트박스 — 그려지는 피규어 전체(발끝 0 ~ 머리 -66*s)를 덮는다.
+  // 과거 34px 기준 원형 판정(cy=-15, r=20)은 하반신만 덮어서 머리·상반신이 관통되던 버그가 있었다.
+  const HUMAN_FIGH = 66
+  function humanBoxLocal() { const hs = humanEffScale(); return { cx: me.humanX, cy: me.humanY - HUMAN_FIGH * 0.5 * hs, hw: 12 * hs, hh: HUMAN_FIGH * 0.52 * hs, s: hs } }
+  function remoteHumanScale(h) { return view.scale * (HUMAN_SCALE + (SSJ_SCALE - HUMAN_SCALE) * (h.ssj || 0)) }
+  function remoteHumanBox(h) {
+    const s = remoteHumanScale(h), W = canvas.clientWidth, H = canvas.clientHeight
+    return { cx: h.nx * W, cy: h.ny * H - HUMAN_FIGH * 0.5 * s, hw: 12 * s, hh: HUMAN_FIGH * 0.52 * s, s }
+  }
+  function inBox(bx, x, y, pad) { return Math.abs(x - bx.cx) < bx.hw + (pad || 0) && Math.abs(y - bx.cy) < bx.hh + (pad || 0) }
   const HUMAN_WEAPON_ITEMS = ['sword', 'pistol', 'rifle', 'bazooka']
   const GUARD_HP = SHIELD_HP * 4, GUARD_BREAK_MS = 5000   // 🛡 인간 가드(E) 내구도(곰 쉴드의 4배)·파괴 후 재생성 대기
   function humanGuarding(now) { return me.humanActive && humanKeys.has('e') && (me.guardHP || 0) > 0 }
@@ -2414,10 +2423,10 @@
     else if (me.beam) me.humanFace = Math.cos(me.beam.ang) >= 0 ? 1 : -1    // 🐉 발사 중 빔 방향으로 몸통 고정
     // melee: enemy ANTS touching the human (missiles/bullets/shells collide attacker-side → human-hit). 250ms i-frames.
     if (now >= (me.humanHitCd || 0)) {
-      const cx = me.humanX, cy = me.humanY - 15 * hs, r = 20 * hs
+      const hb = humanBoxLocal()
       let tx = null, ty = null, byPid = null
       for (const [pid, rec] of remoteAnts) {
-        for (const a of rec.items.values()) { if (a.dead) continue; const sp = remoteAntScreenPos(pid, a); if (sp && Math.hypot(cx - sp.x, cy - sp.y) < r) { tx = sp.x; ty = sp.y; byPid = pid; break } }
+        for (const a of rec.items.values()) { if (a.dead) continue; const sp = remoteAntScreenPos(pid, a); if (sp && inBox(hb, sp.x, sp.y - 8 * view.scale, 6 * view.scale)) { tx = sp.x; ty = sp.y; byPid = pid; break } }
         if (tx != null) break
       }
       if (tx != null) {
@@ -2431,7 +2440,7 @@
     }
     // the human is solid to its OWNER's OWN missiles too — you can attack your own human
     if (now >= (me.humanHitCd || 0)) {
-      const cx = me.humanX, cy = me.humanY - 15 * hs, r = 20 * hs
+      const hb2 = humanBoxLocal()
       for (let i = projectiles.length - 1; i >= 0; i--) {
         const pr = projectiles[i]
         if (pr.human || now < (pr.pierceCd || 0)) continue        // skip the human's own bazooka shot / just-pierced
@@ -2439,7 +2448,7 @@
           addEffect(pr.x, pr.y, 1); spawnSpark(pr.x, pr.y); guardTakeDmg(pr.power || 1, now, pr.x, pr.y)
           explode(pr.x, pr.y, pr.power || 1); bcBoom('missile', pr.mid, pr.x, pr.y, pr.power || 1); projectiles.splice(i, 1); continue
         }
-        if (Math.hypot(cx - pr.x, cy - pr.y) < r + (pr.power ? pr.power * 3 : 0)) {
+        if (inBox(hb2, pr.x, pr.y, (pr.power ? pr.power * 3 : 0))) {
           const hp0 = me.humanHp || 0
           addEffect(pr.x, pr.y, 1); spawnSpark(pr.x, pr.y)
           if ((pr.power || 1) > hp0) { humanTakeDmg(hp0 || 1, now); pr.power -= hp0; pr.pierceCd = now + 140; if (!me.humanActive) return }   // punch through, shrink, keep flying
@@ -2507,13 +2516,6 @@
     const o = humanHandPos(), ang = Math.atan2(cursor.y - o.y, cursor.x - o.x)
     me.beam = { ang, st, born: now, until: now + BEAM_DUR[st - 1], ox: o.x, oy: o.y }; me.beamFireAt = now
   }
-  function stepDevFakeBeam(now) {   // 🛠 dev: 가짜 상대 빔 유지(g=정면 대치, h=합체) — 솔로 테스트용
-    if (!devFakeBeam || !me.humanActive) { if (remoteBeams.has('FAKE')) remoteBeams.delete('FAKE'); return }
-    const W = canvas.clientWidth, H = canvas.clientHeight, s = view.scale
-    const hy = me.humanY - 34 * humanEffScale() * 0.58
-    if (devFakeBeam === 'headon') remoteBeams.set('FAKE', { nx: Math.min(W - 30, me.humanX + 560 * s) / W, ny: hy / H, ang: Math.PI, st: 2, ts: now })
-    else remoteBeams.set('FAKE', { nx: Math.min(W - 30, me.humanX + 70 * s) / W, ny: (hy - 30 * s) / H, ang: 0.1, st: 2, ts: now })
-  }
   // 빔 한 구간(원점·방향)의 판정: 유닛/실드/땅 스캔 + 데미지·파임 적용. 반환 {len, blocked}
   // dmgSt = 데미지 산정에 쓸 내 빔 단계(합체 구간도 "내 몫"만 적용 → 클라마다 중복 적용 없음), wSt = 굵기 기준 단계.
   function beamSegment(ox, oy, ang, wSt, wMul, maxLen, now, dmgSt) {
@@ -2531,7 +2533,7 @@
     for (const [pid, rec] of remoteAnts) { if (now - rec.ts > 800) continue; for (const a of rec.items.values()) { if (a.dead) continue; const sp = remoteAntScreenPos(pid, a); if (!sp) continue; const bh = bodyH(a.sz); consider(sp.x, sp.y - bh * 0.5, () => { if (connected()) net.send(JSON.stringify({ t: 'ant-hit', target: pid, ant: a.id, dmg: dps })) }, bh * 0.5 + 6 * s) } }
     for (const [pid, g] of remoteGatlings) consider(g.nx * W, g.ny * H, () => { if (connected()) net.send(JSON.stringify({ t: 'gat-hit', target: pid, dmg: dps })) })
     for (const [pid, m] of remoteMechas) consider(m.nx * W, m.ny * H - 26 * mechaScale(), () => { if (connected()) net.send(JSON.stringify({ t: 'mecha-hit', target: pid, dmg: dps })) })
-    for (const [pid, h] of remoteHumans) consider(h.nx * W, h.ny * H - 20 * s, () => { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: dps, hx: +(h.nx).toFixed(4), hy: +(h.ny).toFixed(4) })) })
+    for (const [pid, h] of remoteHumans) { const hb = remoteHumanBox(h); consider(hb.cx, hb.cy, () => { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: dps, hx: +(h.nx).toFixed(4), hy: +(h.ny).toFixed(4) })) }, hb.hh) }   // 몸 전체 높이 반영
     for (let ci = 0; ci < catPos.length; ci++) { const cat = allRef[ci], c = catPos[ci]; if (!cat || !c) continue; consider(c.x, c.y - 12 * s, () => { if (!catShieldCovers(cat, c, c.x, c.y - 12 * s, now)) applyCatHit(cat, dps, now) }) }   // 상대 곰 + 내 곰
     let shieldD = Infinity, shieldHit = null   // 🛡 실드(곰 판/상대 인간 가드/메카 돔·본체)가 빔을 막음
     {
@@ -2599,13 +2601,22 @@
   function zapAlongBeam(ox, oy, dx, dy, rad, len, now, relayRemote) {
     const s = view.scale, W = canvas.clientWidth, H = canvas.clientHeight
     const onBeam = (tx, ty, extra) => { const t = (tx - ox) * dx + (ty - oy) * dy; if (t < 6 * s || t > len) return false; const px = ox + dx * t, py = oy + dy * t; return Math.hypot(tx - px, ty - py) <= rad + (extra || 0) }
-    const zap = (arr, chan, idKey) => {
+    // 폭발 연출 누적 방지: 총알 같은 소형 투사체는 스파크만, 대형도 근접 중복은 생략(연사가 빔을 지나갈 때 거대 폭발처럼 보이던 문제)
+    let fxN = 0, fxX = -1e9, fxY = -1e9
+    const puff = (x, y, small) => {
+      spawnSpark(x, y)
+      if (small) return
+      if (fxN >= 2 || Math.hypot(x - fxX, y - fxY) < 26 * s) return
+      fxN++; fxX = x; fxY = y; addEffect(x, y, 1)
+    }
+    const zap = (arr, chan, idKey, small) => {
       for (let k = arr.length - 1; k >= 0; k--) {
         const q = arr[k]; if (!q || !onBeam(q.x, q.y, 4 * s)) continue
-        addEffect(q.x, q.y, 1); spawnSpark(q.x, q.y); if (idKey) bcBoom(chan, q[idKey], q.x, q.y, q.power || 1); arr.splice(k, 1)
+        puff(q.x, q.y, small); if (idKey) bcBoom(chan, q[idKey], q.x, q.y, 1, small)   // 빔에 증발 → 원래 위력 폭발이 아닌 소멸 연출
+        arr.splice(k, 1)
       }
     }
-    zap(projectiles, 'missile', 'mid'); zap(hbullets, 'hbullet', 'id'); zap(gbullets, 'gbullet', 'id')
+    zap(projectiles, 'missile', 'mid'); zap(hbullets, 'hbullet', 'id', true); zap(gbullets, 'gbullet', 'id', true)
     zap(mechaShells, 'mshell', 'id'); zap(energyShots, 'mshell', 'id'); zap(interceptors, 'mshell', 'id')
     zap(summonProj, null, null); zap(overlayIntc, null, null)                    // 소환체 투사체 · 대공포 요격(각자 시뮬 → 각 클라가 자기 것 소멸)
     zap(bombs, null, null); zap(overlayMothFalls, null, null); zap(littleBoys, null, null)   // 낙하 폭탄 · 나방 낙하 · ☢ 낙하 핵
@@ -2616,7 +2627,7 @@
           if (now - rec.ts > ttl) continue
           for (const it of rec.items.values()) if (onBeam(it.sx * W, it.sy * H, 4 * s)) {
             if (connected()) net.send(JSON.stringify({ t: 'col-dmg', target: pid, kind, eid: it.id, dmg: 99 }))
-            addEffect(it.sx * W, it.sy * H, 1); spawnSpark(it.sx * W, it.sy * H)
+            puff(it.sx * W, it.sy * H, kind === 'gbullet' || kind === 'hbullet')
           }
         }
       }
@@ -2630,9 +2641,9 @@
     for (const [pid, rb] of remoteBeams) {
       if (now - rb.ts > 500) continue
       const ox = rb.nx * W, oy = rb.ny * H, dx = Math.cos(rb.ang), dy = Math.sin(rb.ang)
-      let len = maxD
-      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) len = Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy)
-      else if (dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) len = gd } }
+      let len = (rb.len != null && rb.len > 0) ? rb.len * W : maxD   // ⭐ 소유자가 준 막힌 길이까지만 투사체 소멸
+      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) len = Math.min(len, Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy))
+      else if (rb.len == null && dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) len = gd } }
       zapAlongBeam(ox, oy, dx, dy, BEAM_W[(rb.st || 1) - 1] * s * 1.5, len, now, false)
     }
   }
@@ -2646,6 +2657,7 @@
     const r1 = beamSegment(b.ox, b.oy, b.ang, b.st, 1, capLen, now, b.st)
     const clashed = !!bc && r1.len >= capLen - 0.5   // 대치/합류 지점까지 도달해야 성립
     if (!clashed) _beamClash = null
+    me.beamLen = r1.len; me.beamBlk = (!clashed && r1.blocked) ? 1 : 0   // ⭐ 막힌 길이·충돌 여부를 상대에게 relay(양쪽 동일 렌더)
     drawBeam(b, r1.len, r1.ex, r1.ey, !clashed && r1.blocked, now)
     if (clashed && bc.type === 'merge') {   // 🐉 합체 빔도 실제 판정(내 몫 데미지) — 길이는 막힌 곳까지
       const r2 = beamSegment(bc.cx, bc.cy, bc.mergeAng, bc.mergeSt, bc.wMul, maxD, now, b.st)
@@ -2691,7 +2703,6 @@
       }
       if (frac >= 0.86) {   // 상대 빔이 밀려 터짐(가짜 dev 빔은 여기서 직접 제거 — 실제 상대는 자기 클라가 스스로 소멸)
         beamBreakFx(cx, cy, Math.max(1, strF), b.ang + Math.PI); me.beamClashFrac = 0.5
-        if (devFakeBeam && remoteBeams.has('FAKE') && foes.some((f) => f.R === remoteBeams.get('FAKE'))) { devFakeBeam = null; remoteBeams.delete('FAKE') }
         _beamClash = null; return null
       }
       out = { type: 'headon', lenM, cx, cy, ox0: mox, oy0: moy, strM, strF, n: foes.length + allies.length + 1, cut: foes.map((f) => f.R).concat(allies.map((a) => a.R)) }
@@ -3569,7 +3580,7 @@
     for (const [pid, rec] of remoteHbullets) { if (now - rec.ts > 400) continue; for (const it of rec.items.values()) consider(it.sx * W, it.sy * H, () => cd(pid, 'hbullet', it.id)) }
     for (const [pid, rec] of remoteMShells) { if (now - rec.ts > 400) continue; for (const it of rec.items.values()) consider(it.sx * W, it.sy * H, () => cd(pid, 'mshell', it.id)) }
     if (chars) {   // 🐉 상대 인간 + 곰(내 곰 포함 — 혼자서도 테스트 가능). 내 인간은 자기 손에서 나가므로 제외.
-      for (const [pid, h] of remoteHumans) consider(h.nx * W, h.ny * H - 20 * view.scale, () => { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: INT_DMG, hx: +(h.nx).toFixed(4), hy: +(h.ny).toFixed(4) })) })
+      for (const [pid, h] of remoteHumans) { const hb = remoteHumanBox(h); consider(hb.cx, hb.cy, () => { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: INT_DMG, hx: +(h.nx).toFixed(4), hy: +(h.ny).toFixed(4) })) }) }
       for (let ci = 0; ci < catPos.length; ci++) { const cat = allRef[ci], c = catPos[ci]; if (!cat || !c) continue; consider(c.x, c.y - 12 * view.scale, () => { if (!catShieldCovers(cat, c, c.x, c.y - 12 * view.scale, now)) applyCatHit(cat, INT_DMG, now) }) }
     }
     return best
@@ -3622,7 +3633,7 @@
       const p = kiballs[i]
       if (now - p.born > p.life) { kiballs.splice(i, 1); continue }
       { const bh = blackholePull(p, now); if (bh) { spawnDustToHole(p.x, p.y, bh); kiballs.splice(i, 1); continue } }
-      const tg = nearestInterceptTarget(p.x, p.y, true)   // 캐릭터 포함
+      const tg = nearestInterceptTarget(p.x, p.y)   // 캐릭터(곰·인간)로는 유도하지 않음 — 소환체/투사체만
       if (tg && now >= p.homeAt) { const dx = tg.x - p.x, dy = tg.y - p.y, d = Math.hypot(dx, dy) || 1; p.vx += ((dx / d) * p.spd - p.vx) * 0.16; p.vy += ((dy / d) * p.spd - p.vy) * 0.16 }   // 직진 구간 후 유도
       const px0 = p.x, py0 = p.y
       p.x += p.vx; p.y += p.vy
@@ -3947,10 +3958,8 @@
   }
   // an enemy human summon at (x,y) — a collidable target with punch-through, HP 5
   function hitRemoteHuman(x, y) {
-    const W = canvas.clientWidth, H = canvas.clientHeight, s = view.scale * HUMAN_SCALE
     for (const [pid, h] of remoteHumans) {
-      const hx = h.nx * W, hy = h.ny * H - 15 * s
-      if (Math.abs(x - hx) < 16 * s && Math.abs(y - hy) < 22 * s) return { pid, hp: h.hp || HUMAN_HP }
+      if (inBox(remoteHumanBox(h), x, y)) return { pid, hp: h.hp || HUMAN_HP }   // 몸 전체(발끝~머리)
     }
     return null
   }
@@ -4167,8 +4176,9 @@
       if (now - rb.ts > 500) { remoteBeams.delete(pid); continue }
       const ox = rb.nx * W, oy = rb.ny * H, dx = Math.cos(rb.ang), dy = Math.sin(rb.ang)
       let len = maxD, isG = false
-      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) { len = Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy); isG = false }   // 🐉 대치/합류 지점에서 멈춤(3·4개도 전부)
-      else if (dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) { len = gd; isG = true } } }
+      if (rb.len != null && rb.len > 0) { len = rb.len * W; isG = !!rb.blk }   // ⭐ 소유자가 계산한 막힌 길이 그대로 — 유닛/캐릭터/실드에서 동일하게 막힘
+      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) { const cl = Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy); if (cl < len) { len = cl; isG = false } }   // 🐉 대치/합류 지점(더 가까우면)
+      else if (rb.len == null && dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) { len = gd; isG = true } } }   // 구버전 폴백
       ctx.globalAlpha = peerAlpha(pid)
       drawBeam({ ox, oy, ang: rb.ang, st: rb.st }, len, ox + dx * len, oy + dy * len, isG, now)
     }
@@ -6139,7 +6149,7 @@
   // 적 인간(WASD 유닛) — 지상 취급(근접 가능)
   function nearestEnemyHuman(x) {
     const W = canvas.clientWidth, H = canvas.clientHeight; let best = null, bd = Infinity
-    for (const [pid, h] of remoteHumans) { const hx = h.nx * W, d = Math.abs(hx - x); if (d < bd) { bd = d; best = { pid, x: hx, y: h.ny * H - 20 * view.scale, hp: h.hp || 1, flying: false } } }
+    for (const [pid, h] of remoteHumans) { const hb = remoteHumanBox(h), d = Math.abs(hb.cx - x); if (d < bd) { bd = d; best = { pid, x: hb.cx, y: hb.cy, hp: h.hp || 1, flying: false } } }
     return best
   }
   function spawnBlood(x, y, n) {
@@ -6474,7 +6484,7 @@
       let done = false
       { const rr = 24 * view.scale, Hc = canvas.clientHeight
         for (const [pid, m] of remoteMechas) { if (Math.hypot(m.nx * W - p.x, (m.ny * Hc - 20 * view.scale) - p.y) < rr) { if (connected()) net.send(JSON.stringify({ t: 'mecha-hit', target: pid, dmg: p.dmg })); done = true; break } }
-        if (!done) for (const [pid, h] of remoteHumans) { if (Math.hypot(h.nx * W - p.x, (h.ny * Hc - 20 * view.scale) - p.y) < rr) { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: p.dmg, hx: +(p.x / W).toFixed(4), hy: +(p.y / Hc).toFixed(4) })); done = true; break } }
+        if (!done) for (const [pid, h] of remoteHumans) { if (inBox(remoteHumanBox(h), p.x, p.y, rr)) { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: p.dmg, hx: +(p.x / W).toFixed(4), hy: +(p.y / Hc).toFixed(4) })); done = true; break } }
       }
       if (done) { p.aoe ? addEffect(p.x, p.y, 2, 0.2) : spawnSpark(p.x, p.y); summonProj.splice(i, 1); continue }
       // 적 캐릭터(고양이) 충돌 — 데미지 + 소멸(관통 X, 결정2). 규칙2: 조준은 안 하지만 날아와 닿으면 충돌.
@@ -7158,9 +7168,9 @@
       let gang = 0; if (gdOn) { const gcy = me.humanY - 34 * humanEffScale() * 0.7; gang = +Math.atan2(cursor.y - gcy, cursor.x - me.humanX).toFixed(2) }
       net.send(JSON.stringify({ t: 'human', active: 1, nx: +(me.humanX / NW).toFixed(4), ny: +(me.humanY / NH).toFixed(4), hp: me.humanHp, weapon: me.humanWeapon || '', face: me.humanFace || 1, ssj: +(me.ssjP || 0).toFixed(2), wk: me.humanWalking ? 1 : 0, fly: me.humanFlying ? 1 : 0, frot: +(me.flyRot || 0).toFixed(2), fmov: me.flyMoving ? 1 : 0, pk, pang, ocb, oamt, ost, gd: gdOn, gang, ghp: +((me.guardHP || 0) / GUARD_HP).toFixed(2) }))
     } else if (sentHuman) { net.send(JSON.stringify({ t: 'human', active: 0 })); sentHuman = false }
-    if (me.beam) {   // 🐉 카메하메파 빔(원점 정규화 + 각도·단계)
+    if (me.beam) {   // 🐉 카메하메파 빔(원점·각도·단계 + ⭐막힌 길이/충돌 여부 → 상대 화면도 같은 지점에서 막힘)
       const o = me.beam
-      net.send(JSON.stringify({ t: 'beam', on: 1, nx: +(o.ox / NW).toFixed(4), ny: +(o.oy / NH).toFixed(4), ang: +o.ang.toFixed(3), st: o.st })); sentBeam = true
+      net.send(JSON.stringify({ t: 'beam', on: 1, nx: +(o.ox / NW).toFixed(4), ny: +(o.oy / NH).toFixed(4), ang: +o.ang.toFixed(3), st: o.st, len: +((me.beamLen || 0) / NW).toFixed(4), blk: me.beamBlk || 0 })); sentBeam = true
     } else if (sentBeam) { net.send(JSON.stringify({ t: 'beam', on: 0 })); sentBeam = false }
     if (kiballs.length) {
       net.send(JSON.stringify({ t: 'kiballs', list: kiballs.slice(-8).map((p) => ({ nx: +(p.x / NW).toFixed(4), ny: +(p.y / NH).toFixed(4) })) })); sentKi = true
@@ -7730,7 +7740,6 @@
     stepHbullets(now)
     stepNet(now)          // net physics + catching (positions a netted human before it draws)
     stepHuman(now)
-    stepDevFakeBeam(now)
     stepBeam(now)
     if (!battleActive) stepRemoteBeamZap(now)   // 🐉 상대 빔이 내 투사체를 지움(멀티 일관)
     stepMechaMerge(now)

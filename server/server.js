@@ -8,7 +8,7 @@ const SERVER_VERSION = process.env.SERVER_VERSION || (() => { try { return requi
 // ⭐ 접속 게이트는 앱 버전이 아니라 "프로토콜 버전"으로 판정한다. 서버와 주고받는 메시지 규약(타입·필드·좌표계 등
 // 양쪽이 동일하게 해석해야 하는 것)이 바뀔 때만 이 값을 올린다. 클라 전용(서버 무관) 릴리스는 이 값을 그대로 두어
 // 서버 재시작 없이도 구·신 클라가 함께 접속·플레이할 수 있다. **client(app.js)의 PROTOCOL_VERSION과 항상 일치시킬 것.**
-const PROTOCOL_VERSION = 3   // 2 → 3: 🐉 SSJ 시각 동기화(human에 ssj/fly/pose 필드 + beam/kiballs 타입) 추가
+const PROTOCOL_VERSION = 4   // 3 → 4: 🐉 beam에 len(막힌 길이)·blk(충돌) 추가 — 상대 화면에서도 같은 지점에서 막히게
 
 const wss = new WebSocketServer({ port: PORT })
 const rooms = new Map() // code -> Map<id, { ws, name, animal }>
@@ -131,7 +131,7 @@ wss.on('connection', (ws, req) => {
     } else if (msg.t === 'human') {
       broadcast(joinedRoom, { t: 'human', id, active: msg.active, nx: msg.nx, ny: msg.ny, hp: msg.hp, weapon: msg.weapon, face: msg.face, ssj: msg.ssj, wk: msg.wk, fly: msg.fly, frot: msg.frot, fmov: msg.fmov, pk: msg.pk, pang: msg.pang, ocb: msg.ocb, oamt: msg.oamt, ost: msg.ost, gd: msg.gd, gang: msg.gang, ghp: msg.ghp }, id)   // 🐉 SSJ/비행/포즈/충전/가드 동기화
     } else if (msg.t === 'beam') {
-      broadcast(joinedRoom, { t: 'beam', id, on: msg.on, nx: msg.nx, ny: msg.ny, ang: msg.ang, st: msg.st }, id)   // 🐉 카메하메파 빔
+      broadcast(joinedRoom, { t: 'beam', id, on: msg.on, nx: msg.nx, ny: msg.ny, ang: msg.ang, st: msg.st, len: msg.len, blk: msg.blk }, id)   // 🐉 카메하메파 빔(len=막힌 길이·blk=충돌 → 양쪽 동일 렌더)
     } else if (msg.t === 'kiballs' && Array.isArray(msg.list)) {
       broadcast(joinedRoom, { t: 'kiballs', id, list: msg.list.slice(0, 8) }, id)   // 🐉 유도 에네르기파
     } else if (msg.t === 'mecha') {
@@ -147,7 +147,7 @@ wss.on('connection', (ws, req) => {
     } else if (msg.t === 'col-dmg') {
       broadcast(joinedRoom, { t: 'col-dmg', id, target: msg.target, kind: msg.kind, eid: msg.eid, dmg: msg.dmg }, id)   // interceptor/collidable damaged a peer's projectile
     } else if (msg.t === 'boom') {
-      broadcast(joinedRoom, { t: 'boom', id, chan: msg.chan, eid: msg.eid, nx: msg.nx, ny: msg.ny, pw: msg.pw }, id)   // a projectile was destroyed — everyone shows the same blast
+      broadcast(joinedRoom, { t: 'boom', id, chan: msg.chan, eid: msg.eid, nx: msg.nx, ny: msg.ny, pw: msg.pw, sm: msg.sm }, id)   // a projectile was destroyed — everyone shows the same blast
     } else if (msg.t === 'littleboy') {
       broadcast(joinedRoom, { t: 'littleboy', id, nx: msg.nx, ny: msg.ny }, id)   // two nukes fused into a Little Boy at (nx,ny)
     } else if (msg.t === 'healall') {

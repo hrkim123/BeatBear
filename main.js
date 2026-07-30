@@ -482,7 +482,7 @@ app.whenReady().then(() => {
     const slotHeld = new Set()   // slot keys whose combo press we forwarded (for hold-to-charge weapons)
     // WASD forwarded to the overlay ONLY while a controllable human is active (privacy: we don't
     // leak key identity otherwise). The renderer toggles this via the 'human-control' ipc below.
-    const MOVE_KEYS = { [UiohookKey.W]: 'w', [UiohookKey.A]: 'a', [UiohookKey.S]: 's', [UiohookKey.D]: 'd', [UiohookKey.E]: 'e', [UiohookKey.Q]: 'q', [UiohookKey.R]: 'r', [UiohookKey.Shift]: 'shift', [UiohookKey.ShiftRight]: 'shift', [UiohookKey.G]: 'g', [UiohookKey.H]: 'h' }   // Shift = 🐉 비행 부스트, G/H = dev 가짜 빔 테스트
+    const MOVE_KEYS = { [UiohookKey.W]: 'w', [UiohookKey.A]: 'a', [UiohookKey.S]: 's', [UiohookKey.D]: 'd', [UiohookKey.E]: 'e', [UiohookKey.Q]: 'q', [UiohookKey.R]: 'r', [UiohookKey.Shift]: 'shift', [UiohookKey.ShiftRight]: 'shift' }   // Shift = 🐉 비행 부스트
     uIOhook.on('keydown', (e) => {
       // ignore OS auto-repeat while a key is held — act only on the initial press
       if (keysDown.has(e.keycode)) return
