@@ -2102,6 +2102,30 @@
     me.guardHP -= (dmg || 1)
     if (me.guardHP <= 0) { me.guardHP = 0; me.guardBrokenUntil = now + GUARD_BREAK_MS; if (gx != null) { spawnSpark(gx, gy); addEffect(gx, gy, 1) } }
   }
+  // 🛡 인간 가드 판이 (px,py)로 날아오는 투사체를 막는가 — 곰 판 실드(shieldBlocks)와 같은 규칙(호·거리대·안쪽 방향)
+  function guardPlateBlocks(px, py, vx, vy, gx, gy, gang, sc) {
+    const D = SHIELD_DIST * sc, band = SHIELD_BAND * sc + 8 * view.scale
+    const toCx = gx - px, toCy = gy - py
+    if ((vx * toCx + vy * toCy) <= 0) return false            // 안쪽으로 들어오는 것만(밖으로 쏘는 건 통과)
+    const dist = Math.hypot(toCx, toCy)
+    if (dist < D - band || dist > D + band) return false
+    return angDiff(Math.atan2(-toCy, -toCx), gang) <= SHIELD_SPAN / 2
+  }
+  function myGuardBlocks(px, py, vx, vy, now) {   // 내 인간 가드(E)로 막히는가
+    if (!humanGuarding(now)) return false
+    const hs = humanEffScale(), gy = me.humanY - 34 * hs * 0.7
+    const gang = Math.atan2(cursor.y - gy, cursor.x - me.humanX)
+    return guardPlateBlocks(px, py, vx, vy, me.humanX, gy, gang, hs * 0.3)
+  }
+  function remoteGuardBlocks(px, py, vx, vy) {   // 상대 인간 가드에 막히는가 → { pid }
+    const W = canvas.clientWidth, H = canvas.clientHeight
+    for (const [pid, h] of remoteHumans) {
+      if (!h.gd) continue
+      const hs2 = view.scale * (HUMAN_SCALE + (SSJ_SCALE - HUMAN_SCALE) * (h.ssj || 0))
+      if (guardPlateBlocks(px, py, vx, vy, h.nx * W, h.ny * H - 34 * hs2 * 0.7, h.gang || 0, hs2 * 0.3)) return { pid }
+    }
+    return null
+  }
   // 광선(원점 ox,oy · 방향 dx,dy)이 판 실드(중심 cx,cy에서 D 거리·plateAng 방향·반각 half·두께 band)에 막히는 거리 t. 안 막히면 null.
   function rayHitsPlate(ox, oy, dx, dy, cx, cy, D, band, plateAng, half, maxLen, s) {
     const stepM = Math.max(4, 6 * s)
@@ -2411,6 +2435,10 @@
       for (let i = projectiles.length - 1; i >= 0; i--) {
         const pr = projectiles[i]
         if (pr.human || now < (pr.pierceCd || 0)) continue        // skip the human's own bazooka shot / just-pierced
+        if (myGuardBlocks(pr.x, pr.y, pr.vx || 0, pr.vy || 0, now)) {   // 🛡 가드 판에 명중 → 인간 대신 가드가 받음
+          addEffect(pr.x, pr.y, 1); spawnSpark(pr.x, pr.y); guardTakeDmg(pr.power || 1, now, pr.x, pr.y)
+          explode(pr.x, pr.y, pr.power || 1); bcBoom('missile', pr.mid, pr.x, pr.y, pr.power || 1); projectiles.splice(i, 1); continue
+        }
         if (Math.hypot(cx - pr.x, cy - pr.y) < r + (pr.power ? pr.power * 3 : 0)) {
           const hp0 = me.humanHp || 0
           addEffect(pr.x, pr.y, 1); spawnSpark(pr.x, pr.y)
@@ -6927,6 +6955,13 @@
           addEffect(p.x, p.y, 1); spawnSpark(p.x, p.y)
           if (p.power > rmc.hp) { p.power -= rmc.hp; p.pierceCd = now + 140 }   // punch through, shrink
           else { explode(p.x, p.y, p.power); bcBoom('missile', p.mid, p.x, p.y, p.power); projectiles.splice(i, 1); continue }
+        }
+        if (pierceReady) {   // 🛡 상대 인간 가드 판에 먼저 막힘 → 그 자리서 폭발(가드 내구도는 소유자가 human-hit로 차감)
+          const rg = remoteGuardBlocks(p.x, p.y, p.vx || 0, p.vy || 0)
+          if (rg) {
+            if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: rg.pid, dmg: p.power, hx: +(p.x / canvas.clientWidth).toFixed(4), hy: +(p.y / canvas.clientHeight).toFixed(4) }))
+            addEffect(p.x, p.y, 1); spawnSpark(p.x, p.y); explode(p.x, p.y, p.power); bcBoom('missile', p.mid, p.x, p.y, p.power); projectiles.splice(i, 1); continue
+          }
         }
         // an enemy human summon: same rule (HP 5). Its cursor shield can block (checked on the owner's side).
         const rhu = pierceReady ? hitRemoteHuman(p.x, p.y) : null
