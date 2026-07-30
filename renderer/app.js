@@ -48,7 +48,10 @@
   const gatSmoke = []                 // overheat smoke puffs { x, y, vx, vy, r, born, life }
   const remoteGatlings = new Map()    // peerId -> { nx, ny, hp, ang }
   const remoteGBullets = new Map()    // peerId -> { items: Map, ts }
-  const remoteHumans = new Map()      // peerId -> { nx, ny, hp, weapon, face }
+  const remoteHumans = new Map()      // peerId -> { nx, ny, hp, weapon, face, ssj, wk, fly, frot, fmov, pk, pang, ocb, oamt, ost }
+  const remoteBeams = new Map()       // 🐉 peerId -> { nx, ny, ang, st, ts }  카메하메파
+  let devFakeBeam = null              // 🛠 dev 전용 가짜 상대 빔('headon'|'merge') — 빔 대치 솔로 테스트
+  const remoteKiballs = new Map()     // 🐉 peerId -> { list:[{nx,ny}], ts }  유도 에네르기파
   const remoteHbullets = new Map()    // peerId -> { items: Map, ts }  (human bullets/검기/아도겐)
   let hbId = 1
   let lmbDown = false                 // left mouse held (from main's global hook)
@@ -263,12 +266,12 @@
   let keybinds = DEFAULT_KEYBINDS
   try { const kb = JSON.parse(localStorage.getItem('keybinds') || 'null'); if (kb && Array.isArray(kb.keys) && kb.keys.length) keybinds = { mod: kb.mod || 'alt', keys: kb.keys.slice(0, 3) } } catch {}
   if (inputSource.setKeybinds) inputSource.setKeybinds(keybinds)   // tell main which physical keys to watch
-  // 옵션: FPS 상한(기본 60 = 제한 없음) + F3 하단바 숨김 상태
+  // 옵션: FPS 상한(기본 60 = 제한 없음)
   let targetFps = 60; try { const f = parseInt(localStorage.getItem('fps') || '60', 10); if (f >= 20 && f <= 60) targetFps = f } catch {}
   let lastDraw = 0
-  let barHidden = false; try { barHidden = localStorage.getItem('barHidden') === '1' } catch {}
+  const barHidden = false   // (F3 하단바 숨기기 기능 제거) — 하단바 항상 표시. battleActive에서만 별도 숨김 처리.
   let barApplied = false
-  function setBarHidden(on) { barHidden = !!on; try { localStorage.setItem('barHidden', barHidden ? '1' : '0') } catch {}; const hb = document.getElementById('hud-bar'); if (hb && !battleActive) hb.style.display = barHidden ? 'none' : '' }
+  function setBarHidden() { const hb = document.getElementById('hud-bar'); if (hb && !battleActive) hb.style.display = '' }   // 항상 표시(no-op 유지: 호출부 호환)
   // 단축키 라벨(현재 설정 기준) — 단축키가 보이는 모든 곳이 이 헬퍼를 쓰게 해서 설정 변경 시 자동 최신화
   function modLabel(mod) {   // 없음/프리셋/커스텀 키 모두 처리
     if (!mod || mod === 'none') return ''
@@ -883,7 +886,7 @@
   }
 
   const FIXED_ROOM = 'MAIN'   // 모델2: 서버가 곧 방. 방 코드 없이 서버당 단일 공용 방 — 접속 대상은 서버 IP로만 구분
-  const PROTOCOL_VERSION = 2  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속. (2: 개발자 코인 상자 추가)
+  const PROTOCOL_VERSION = 3  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속. (3: SSJ 시각 동기화 beam/kiballs+human 확장)
   function connect(url) {
     disconnect()
     setStatus('접속 중…')
@@ -1033,8 +1036,8 @@
           const nowP = performance.now(), hs = view.scale * HUMAN_SCALE
           const scx = me.humanX, scy = me.humanY - 34 * hs * 0.7, shieldAng = Math.atan2(cursor.y - scy, cursor.x - scx)
           const hx = (msg.hx || 0) * canvas.clientWidth, hy = (msg.hy || 0) * canvas.clientHeight
-          const blocked = humanKeys.has('e') && angDiff(Math.atan2(hy - scy, hx - scx), shieldAng) <= SHIELD_SPAN / 2   // cursor shield on the hit side
-          if (blocked) { me.humanHitCd = nowP + 150; spawnSpark(scx + Math.cos(shieldAng) * 30 * hs, scy + Math.sin(shieldAng) * 30 * hs) }
+          const blocked = humanGuarding(nowP) && angDiff(Math.atan2(hy - scy, hx - scx), shieldAng) <= SHIELD_SPAN / 2   // cursor shield on the hit side
+          if (blocked) { me.humanHitCd = nowP + 150; spawnSpark(scx + Math.cos(shieldAng) * 30 * hs, scy + Math.sin(shieldAng) * 30 * hs); guardTakeDmg(msg.dmg || 1, nowP, scx + Math.cos(shieldAng) * 30 * hs, scy + Math.sin(shieldAng) * 30 * hs) }
           else humanTakeDmg(msg.dmg || 1, nowP, msg.id)
         }
       }
@@ -1045,9 +1048,14 @@
         }
       }
       else if (msg.t === 'human') {
-        if (msg.active) remoteHumans.set(msg.id, { nx: msg.nx, ny: msg.ny, hp: msg.hp, weapon: msg.weapon || '', face: msg.face || 1 })
-        else remoteHumans.delete(msg.id)
+        if (msg.active) remoteHumans.set(msg.id, { nx: msg.nx, ny: msg.ny, hp: msg.hp, weapon: msg.weapon || '', face: msg.face || 1, ssj: +msg.ssj || 0, wk: msg.wk || 0, fly: msg.fly || 0, frot: +msg.frot || 0, fmov: msg.fmov || 0, pk: msg.pk || 0, pang: +msg.pang || 0, ocb: msg.ocb || 0, oamt: +msg.oamt || 0, ost: msg.ost || 0, gd: msg.gd || 0, gang: +msg.gang || 0, ghp: msg.ghp != null ? +msg.ghp : 1 })
+        else { remoteHumans.delete(msg.id); remoteBeams.delete(msg.id); remoteKiballs.delete(msg.id) }
       }
+      else if (msg.t === 'beam') {   // 🐉 상대 카메하메파
+        if (msg.on) remoteBeams.set(msg.id, { nx: msg.nx, ny: msg.ny, ang: +msg.ang || 0, st: msg.st || 1, ts: performance.now() })
+        else remoteBeams.delete(msg.id)
+      }
+      else if (msg.t === 'kiballs') { if (msg.list && msg.list.length) remoteKiballs.set(msg.id, { list: msg.list, ts: performance.now() }); else remoteKiballs.delete(msg.id) }
       else if (msg.t === 'mecha') {
         if (msg.active) remoteMechas.set(msg.id, { nx: msg.nx, ny: msg.ny, hp: msg.hp, face: msg.face || 1, shield: msg.shield || 0, form: msg.form || 0, thr: msg.thr || 0, ch: msg.ch || 0, chg: msg.chg || 0, mang: msg.mang || 0, sdep: msg.sdep || 0, snx: msg.snx, sny: msg.sny, sang: msg.sang || 0 })
         else remoteMechas.delete(msg.id)
@@ -1363,7 +1371,6 @@
     }
     else if (msg.t === 'connect') { connect(msg.url) }
     else if (msg.t === 'disconnect') { disconnect(); setStatus('오프라인 — 혼자 연주 중') }
-    else if (msg.t === 'toggle-bar') { setBarHidden(!barHidden); showToast(barHidden ? '👁️ 하단바 숨김 (F3로 복원)' : '👁️ 하단바 표시') }   // F3 전역키
     else if (msg.t === 'edit') { setEditing(!!msg.on) }
     else if (msg.t === 'safemode') { setSafeMode(!!msg.on) }
     else if (msg.t === 'chat') { openChat() }
@@ -1401,17 +1408,21 @@
           humanKeys.add(msg.key)
           if (msg.key === 'q') {
             if (weaponsLocked()) { /* weapons locked */ }
-            else if (me.humanActive) humanAttack()                              // human attack
+            else if (me.humanActive) { if (me.ssj) { me.beamCharging = true; me.beamChargeStart = performance.now(); me.beam = null } else humanAttack() }   // SSJ=카메하메파 충전 / 평상시=공격
             else if (me.mechaActive) { me.mechaCharging = true; me.mechaChargeStart = performance.now(); me.mechaCharge = 0 }   // mecha cannon / energy charge
             else if (!me.gatActive && antMax() >= 10 && ants.filter((a) => !a.dead && !a.falling && !a.sprite).length >= 10) mergeAntsToMecha()   // 기본 개미(스프라이트 아님) 10마리일 때만 합체
-          } else if (msg.key === 'r' && !weaponsLocked() && me.mechaActive && (me.mechaForm || 0) >= 0.5 && !me.mechaTransforming) fireInterceptors(performance.now())   // human-form R: interceptors
+          } else if (msg.key === 'w' && me.humanActive && me.ssj && !me.humanGround && !me.humanFlying) { me.humanFlying = true; me.flyAfter = []; me.flyRot = 0; me.flyMoving = false }   // 🐉 점프 후 공중에서 W → 비행 진입(직립 시작)
+          else if ((msg.key === 'g' || msg.key === 'h') && me.humanActive && window.beatbear && window.beatbear.isDev) { const m = msg.key === 'g' ? 'headon' : 'merge'; devFakeBeam = devFakeBeam === m ? null : m }   // 🛠 dev: 가짜 상대 빔 토글(g=정면, h=합체)
+          else if (msg.key === 'r' && me.humanActive && me.ssj && !weaponsLocked()) fireKiHoming(performance.now())   // 🐉 SSJ R: 유도 에네르기파 2발
+          else if (msg.key === 'r' && !weaponsLocked() && me.mechaActive && (me.mechaForm || 0) >= 0.5 && !me.mechaTransforming) fireInterceptors(performance.now())   // human-form R: interceptors
         }
       } else {
         humanKeys.delete(msg.key)
-        if (msg.key === 'q') { if (me.humanActive) humanRelease(); else if (me.mechaActive && me.mechaCharging) { me.mechaCharging = false; const t = performance.now(); if (weaponsLocked()) { /* locked */ } else if ((me.mechaForm || 0) >= 0.5) fireEnergyCannon(t); else if (t >= (me.mechaShellCd || 0)) { fireMechaShell(t); me.mechaShellCd = t + MSHELL_CD } } }
+        if (msg.key === 'q') { if (me.humanActive) { if (me.beamCharging) { me.beamCharging = false; fireBeam(performance.now()) } else humanRelease() } else if (me.mechaActive && me.mechaCharging) { me.mechaCharging = false; const t = performance.now(); if (weaponsLocked()) { /* locked */ } else if ((me.mechaForm || 0) >= 0.5) fireEnergyCannon(t); else if (t >= (me.mechaShellCd || 0)) { fireMechaShell(t); me.mechaShellCd = t + MSHELL_CD } } }
       }
     }
     else if (msg.t === 'mecha-transform') { if (!platformMode && me.mechaActive) startMechaTransform(performance.now()) }
+    else if (msg.t === 'human-transform') { if (!platformMode && me.humanActive) toggleSSJ(performance.now()) }   // 🐉 Ctrl+` 초사이언 변신/해제
     else if (msg.t === 'fire-missile') { fireWeapon('missile') }
     else if (msg.t === 'fire-slot') {
       if (battleActive && battle) {
@@ -2021,6 +2032,15 @@
   // ---------- 🕺 controllable human (WASD) — broadcast so peers see it (t:'human' / 'hbullets') ----------
   // WASD move + W jump, E = raise a shield (blocks front hits), left-click = punch (dmg 1).
   const HUMAN_SPEED = 3.4, HUMAN_JUMP = 12, HUMAN_GRAV = 0.62, HUMAN_HP = 5, HUMAN_SCALE = 1.8
+  // ---- 🐉 초사이언(SSJ) 변신 ----
+  const SSJ_SCALE = 1.9            // 초사이언 크기 = 메카 인간폼(MECHA_SCALE 2.72)의 ~70%
+  const SSJ_DURATION = 60000       // 변신 60초 후 자동 해제
+  const SSJ_TRANSFORM_MS = 1200    // 변신/해제 연출 길이
+  function humanEffScale() { return view.scale * (HUMAN_SCALE + (SSJ_SCALE - HUMAN_SCALE) * (me.ssjP || 0)) }
+  function toggleSSJ(now) {
+    if (me.ssj) { me.ssj = 0 }                              // → 해제(ssjP가 0으로 하강하며 연출)
+    else { me.ssj = 1; me.ssjUntil = now + SSJ_DURATION }   // → 변신(ssjP 상승, 완료 시 플래시)
+  }
   const humanKeys = new Set()
   function deployHuman() {
     if (me.humanActive) { removeHuman(); return }   // fire again → dismiss (no charge)
@@ -2032,11 +2052,16 @@
     me.humanVX = 0; me.humanVY = 0; me.humanFace = 1; me.humanGround = true
     me.humanTossVx = 0; me.humanTossKill = false; me.humanNetted = false; me.humanFalling = false
     me.humanHp = HUMAN_HP; me.humanHitCd = 0; me.humanWeapon = null; me.humanAtkCd = 0; me.charging = false; me.charge = 0
+    me.ssj = 0; me.ssjP = 0; me.ssjUntil = 0; me.ssjFlashAt = 0; me.ssjLastT = 0   // 초사이언 상태 리셋
+    me.beam = null; me.beamCharging = false; me.beamChargeStart = 0; me.kiCd = 0
+    me.beamMaxed = false; me.beamMaxFlashAt = 0; me.kiSecondAt = 0; me.kiFireAt = 0
+    me.humanFlying = false; me.flyRot = 0; me.flyMoving = false; me.flyAfter = []; me.flyTrail = []
+    me.guardHP = GUARD_HP; me.guardBrokenUntil = 0   // 🛡 가드 내구도
     humanKeys.clear()
     if (inputSource.humanControl) inputSource.humanControl(true)   // ask main to forward WASD
   }
   function removeHuman() {
-    me.humanActive = false; humanKeys.clear()
+    me.humanActive = false; me.ssj = 0; me.ssjP = 0; me.beam = null; me.beamCharging = false; me.humanFlying = false; humanKeys.clear()
     if (inputSource.humanControl) inputSource.humanControl(false)
   }
   function humanTakeDmg(dmg, now, byId) {
@@ -2070,6 +2095,23 @@
     bazooka: { name: '🚀 바주카', price: 50000, emoji: '🚀', power: 3, cd: 800 }
   }
   const HUMAN_WEAPON_ITEMS = ['sword', 'pistol', 'rifle', 'bazooka']
+  const GUARD_HP = SHIELD_HP * 4, GUARD_BREAK_MS = 5000   // 🛡 인간 가드(E) 내구도(곰 쉴드의 4배)·파괴 후 재생성 대기
+  function humanGuarding(now) { return me.humanActive && humanKeys.has('e') && (me.guardHP || 0) > 0 }
+  function guardTakeDmg(dmg, now, gx, gy) {   // 가드 내구도 차감 — 0이면 파괴(잠시 사용 불가)
+    if ((me.guardHP || 0) <= 0) return
+    me.guardHP -= (dmg || 1)
+    if (me.guardHP <= 0) { me.guardHP = 0; me.guardBrokenUntil = now + GUARD_BREAK_MS; if (gx != null) { spawnSpark(gx, gy); addEffect(gx, gy, 1) } }
+  }
+  // 광선(원점 ox,oy · 방향 dx,dy)이 판 실드(중심 cx,cy에서 D 거리·plateAng 방향·반각 half·두께 band)에 막히는 거리 t. 안 막히면 null.
+  function rayHitsPlate(ox, oy, dx, dy, cx, cy, D, band, plateAng, half, maxLen, s) {
+    const stepM = Math.max(4, 6 * s)
+    for (let t = 12 * s; t < maxLen; t += stepM) {
+      const px = ox + dx * t, py = oy + dy * t
+      const ddx = px - cx, ddy = py - cy, dist = Math.hypot(ddx, ddy)
+      if (dist >= D - band && dist <= D + band && angDiff(Math.atan2(ddy, ddx), plateAng) <= half && (dx * -ddx + dy * -ddy) > 0) return t
+    }
+    return null
+  }
   const GW_LIFE = 30000, GW_BLINK = 3000, GW_MAX = 3
   const groundWeapons = []            // { kind, x, y, vy, onGround, born }
   const hbullets = []                 // pistol/rifle bullets { x,y,vx,vy,born,life,dmg,big }
@@ -2096,10 +2138,7 @@
     return false
   }
   function stepGroundWeapons(now) {
-    if (me.humanActive && now > gwSpawnAt && groundWeapons.length < GW_MAX) {   // random spawns only while a human exists
-      gwSpawnAt = now + 15000 + Math.random() * 20000
-      spawnGroundWeapon(HUMAN_WEAPON_ITEMS[Math.floor(Math.random() * HUMAN_WEAPON_ITEMS.length)], false)
-    } else if (!me.humanActive) gwSpawnAt = now + 8000   // hold off the timer until a human is summoned
+    // 바닥 무기 랜덤 스폰 비활성화(인간=오공풍 기 캐릭터 → 총기 픽업 제거). 상점 소환 드롭(summonHumanWeapon)만 유지.
     const s = view.scale
     for (let i = groundWeapons.length - 1; i >= 0; i--) {
       const g = groundWeapons[i], age = now - g.born
@@ -2140,14 +2179,14 @@
       if (ch >= SLASH_MIN) fireSlash(now, ch); else humanMelee(HUMAN_WEAPONS.sword, now)
     } else if (kind === 'adogen') {
       me.humanAtkCd = now + 260
-      if (ch >= SLASH_MIN) fireAdogen(now, ch); else humanPunch()
+      if (ch >= SLASH_MIN) { fireAdogen(now, ch); me.humanFireAt = now } else humanPunch()   // 🔵 발사 순간 손 앞으로
     }
     me.charge = 0
   }
   function fireAdogen(now, charge) {   // 아도겐: ki blast — size/HP/damage scale with charge (max 5); big ground dig
     const hs = view.scale * HUMAN_SCALE, oy = me.humanY - 18 * hs
     const ang = Math.atan2(cursor.y - oy, cursor.x - me.humanX); me.humanFace = Math.cos(ang) >= 0 ? 1 : -1
-    const hp = Math.max(1, Math.round(charge * 5))              // 1..5
+    const hp = Math.max(1, Math.round(charge * 3))              // 1..3 (기본 아도겐 상한 하향)
     hbullets.push({ x: me.humanX + Math.cos(ang) * 26 * hs, y: oy + Math.sin(ang) * 26 * hs, vx: Math.cos(ang) * 9, vy: Math.sin(ang) * 9, born: now, life: 1800, adogen: true, hp, hp0: hp, waveR: (10 + charge * 26) * view.scale, ang })
   }
   function fireSlash(now, charge) {   // 검기: crescent wave — size/damage/HP scale with charge (max hp=dmg=6, 2× size)
@@ -2204,10 +2243,17 @@
       const deplete = (amt) => { if (now < (p.hitCd || 0)) return false; p.hitCd = now + 130; addEffect(p.x, p.y, 1); spawnSpark(p.x, p.y); p.hp -= (amt || 1); return p.hp <= 0 }
       const plsw = platformSweep(p.x - p.vx, p.y - p.vy, p.x, p.y)
       if (plsw) { damagePlatform(plsw.pl, dmg); if (!energy) { spawnSpark(plsw.hx, plsw.hy); hbullets.splice(i, 1); continue } else if (deplete(1)) { hbullets.splice(i, 1); continue } }
-      const antR = energy ? effR : 12 * s   // energy sweeps wider + pierces
+      const antR = energy ? effR : 12 * s   // energy sweeps wider + pierces (대상 유효 HP만큼 자기 HP 소모)
       let hit = false, catHit = false
-      for (const a of ants) if (!a.dead && Math.hypot(p.x - a.x, p.y - a.y) < antR) { antTakeDmg(a, dmg); if (a.dead) addAntKill(); hit = true; if (!energy) break }
-      if (!hit || energy) { const ah = missileHitsAnt(p.x, p.y); if (ah && !ah.local) { if (connected()) net.send(JSON.stringify({ t: 'ant-hit', target: ah.pid, ant: ah.id, dmg })); hit = true } }
+      for (const a of ants) {
+        if (a.dead || Math.hypot(p.x - a.x, p.y - a.y) >= antR) continue
+        const cost = (a.shHp || 0) + Math.max(1, a.hp || 1)   // 관통 비용 = 대상 유효 HP(실드 포함)
+        antTakeDmg(a, dmg); if (a.dead) addAntKill(); hit = true
+        if (!energy) break
+        p.hp -= cost; addEffect(p.x, p.y, 1); if (p.hp <= 0) break   // HP 소진 시 관통 멈춤
+      }
+      if (energy && p.hp <= 0) { spawnSpark(p.x, p.y); bcBoom('hbullet', p.id, p.x, p.y, 2); hbullets.splice(i, 1); continue }
+      if (!hit || energy) { const ah = missileHitsAnt(p.x, p.y); if (ah && !ah.local) { if (connected()) net.send(JSON.stringify({ t: 'ant-hit', target: ah.pid, ant: ah.id, dmg })); hit = true; if (energy) { p.hp -= 1; if (p.hp <= 0) { spawnSpark(p.x, p.y); bcBoom('hbullet', p.id, p.x, p.y, 2); hbullets.splice(i, 1); continue } } } }
       // generous full-body cat hitbox (tall ellipse) so shots from the low human don't slip past the sprite
       const chw = (energy ? effR + 26 * s : 52 * s), chh = (energy ? effR + 56 * s : 90 * s)
       for (let ci = 0; ci < catPos.length; ci++) {
@@ -2216,6 +2262,18 @@
         if ((dx * dx) / (chw * chw) + (dy * dy) / (chh * chh) <= 1) {
           if (!catShieldCovers(cat, c, p.x, p.y, now)) applyCatHit(cat, dmg, now)
           hit = true; catHit = true; if (!energy) break
+        }
+      }
+      if (!catHit) {   // 상대 소환 캐릭터(게틀링/메카/인간) = 솔리드(곰과 동일 취급)
+        let rk = null, rt = hitRemoteGatling(p.x, p.y)
+        if (rt) rk = 'gat'; else { rt = hitRemoteMecha(p.x, p.y); if (rt) rk = 'mecha'; else { rt = hitRemoteHuman(p.x, p.y); if (rt) rk = 'human' } }
+        if (rt) {
+          if (connected()) {
+            if (rk === 'gat') net.send(JSON.stringify({ t: 'gat-hit', target: rt.pid, dmg }))
+            else if (rk === 'mecha') net.send(JSON.stringify({ t: 'mecha-hit', target: rt.pid, dmg }))
+            else net.send(JSON.stringify({ t: 'human-hit', target: rt.pid, dmg, hx: +(p.x / canvas.clientWidth).toFixed(4), hy: +(p.y / canvas.clientHeight).toFixed(4) }))
+          }
+          hit = true; catHit = true
         }
       }
       if (energy && catHit) { addEffect(p.x, p.y, 1); spawnSpark(p.x, p.y); bcBoom('hbullet', p.id, p.x, p.y, 2); hbullets.splice(i, 1); continue }   // character = solid: deliver DMG (via applyCatHit) then vanish
@@ -2245,8 +2303,13 @@
   }
   function stepHuman(now) {
     if (!me.humanActive) return
+    // 🐉 초사이언 변신 진행(ssjP 0↔1) + 60초 자동 해제 + 완료 플래시
+    { const dt = Math.min(50, now - (me.ssjLastT || now)); me.ssjLastT = now
+      if (me.ssj && now > (me.ssjUntil || 0)) me.ssj = 0
+      const tgt = me.ssj ? 1 : 0, cur = me.ssjP || 0
+      if (cur !== tgt) { const dir = tgt > cur ? 1 : -1; const np = Math.max(0, Math.min(1, cur + dir * (dt / SSJ_TRANSFORM_MS))); if (dir > 0 && np >= 1 && cur < 1) me.ssjFlashAt = now; me.ssjP = np } }
     if (me.humanNetted) { drawHuman(now, false); return }   // caught in a net → held at the bundle (stepNet positions it)
-    const s = view.scale, hs = view.scale * HUMAN_SCALE, W = canvas.clientWidth
+    const s = view.scale, hs = humanEffScale(), W = canvas.clientWidth
     if (me.humanFalling) {   // fell into a dug-through hole → drop straight down, remove once fully off-screen
       me.humanFallVy = (me.humanFallVy || 1) + 0.6 * hs; me.humanY += me.humanFallVy; drawHuman(now, false)
       if (me.humanY > canvas.clientHeight + 50 * s) removeHuman()
@@ -2261,27 +2324,70 @@
       if (!bhPull) bhPull = { x: 0, y: 0 }
       bhPull.x += (dx / d) * sp; bhPull.y += (dy / d) * sp
     }
+    if (me.humanFlying && !me.ssj) me.humanFlying = false   // 🐉 SSJ 해제되면 비행 종료(중력으로 착지)
+    const beamLock = me.beamCharging || !!me.beam   // 🐉 기 충전/발사 중 이동 잠금
     let moving = false
-    if (humanKeys.has('a')) { me.humanX -= HUMAN_SPEED * hs; me.humanFace = -1; moving = true }
-    if (humanKeys.has('d')) { me.humanX += HUMAN_SPEED * hs; me.humanFace = 1; moving = true }
+    if (!beamLock && !me.humanFlying) {
+      if (humanKeys.has('a')) { me.humanX -= HUMAN_SPEED * hs; me.humanFace = -1; moving = true }
+      if (humanKeys.has('d')) { me.humanX += HUMAN_SPEED * hs; me.humanFace = 1; moving = true }
+    }
     if (me.humanTossVx) { me.humanX += me.humanTossVx; me.humanTossVx *= 0.99; if (Math.abs(me.humanTossVx) < 0.2) me.humanTossVx = 0 }   // net-fling horizontal (persists → real arc)
     const floor = antGroundY(me.humanX) - 1
     if (bhPull) {                                       // sucked in: pull + your input combine; no gravity/floor
       if (humanKeys.has('w')) me.humanY -= HUMAN_SPEED * hs
       if (humanKeys.has('s')) me.humanY += HUMAN_SPEED * hs
       me.humanX += bhPull.x; me.humanY += bhPull.y; me.humanGround = false; me.humanVY = 0
+    } else if (me.humanFlying) {   // 🐉 비행: 슈퍼맨 포즈(진행 방향으로 몸 일직선 + 손 뻗음)
+      const boost = humanKeys.has('shift')   // 🐉 Shift = 부스트(더 빠름)
+      const FLY = HUMAN_SPEED * hs * 1.5 * (boost ? 2 : 1)
+      let mvx = 0, mvy = 0
+      if (!beamLock) {
+        if (humanKeys.has('a')) mvx -= 1
+        if (humanKeys.has('d')) mvx += 1
+        if (humanKeys.has('w')) mvy -= 1
+        if (humanKeys.has('s')) mvy += 1
+      }
+      const nrm = (mvx && mvy) ? 0.707 : 1
+      me.humanX += mvx * FLY * nrm; me.humanY += mvy * FLY * nrm
+      moving = !!(mvx || mvy); me.humanGround = false; me.humanVY = 0; me.flyMoving = moving
+      me.flyBoost = boost && moving   // 부스트 트레일(띠) — 켜졌을 때 발 위치를 궤적으로 기록, 꺼지면 뒤에서부터 사라짐
+      if (me.flyBoost) { if (now - (me.flyTrailAt || 0) > 22) { me.flyTrailAt = now; (me.flyTrail || (me.flyTrail = [])).push({ x: me.humanX, y: me.humanY }); if (me.flyTrail.length > 12) me.flyTrail.shift() } }
+      else if (me.flyTrail && me.flyTrail.length && now - (me.flyTrailAt || 0) > 22) { me.flyTrailAt = now; me.flyTrail.shift() }
+      let targetRot = 0   // 정지 = 직립(0)
+      if (moving) {
+        const ang = Math.atan2(mvy, mvx)
+        targetRot = Math.atan2(Math.cos(ang), -Math.sin(ang))   // 머리가 진행 방향을 향하도록
+        if (mvx) me.humanFace = mvx > 0 ? 1 : -1
+      }
+      let dr = targetRot - (me.flyRot || 0); while (dr > Math.PI) dr -= 2 * Math.PI; while (dr < -Math.PI) dr += 2 * Math.PI
+      me.flyRot = (me.flyRot || 0) + dr * 0.22   // 슈퍼맨↔직립 부드럽게 보간
+      if (moving && now - (me.flyAfterAt || 0) > 45) { me.flyAfterAt = now; (me.flyAfter || (me.flyAfter = [])).push({ x: me.humanX, y: me.humanY, f: me.humanFace, rot: me.flyRot, born: now }); if (me.flyAfter.length > 5) me.flyAfter.shift() }
+      me.humanY = Math.max(40 * s, me.humanY)
+      if (me.humanY >= floor) { me.humanY = floor; me.humanFlying = false; me.humanGround = true; me.flyTrail = [] }   // 착지 → 걷기
     } else {
-      if (humanKeys.has('w') && me.humanGround) { me.humanVY = -HUMAN_JUMP * hs; me.humanGround = false }
+      if (humanKeys.has('w') && me.humanGround && !beamLock) { me.humanVY = -HUMAN_JUMP * hs; me.humanGround = false }
       const prevY = me.humanY
       me.humanGround = false
       me.humanVY += HUMAN_GRAV * hs; me.humanY += me.humanVY
-      if (humanKeys.has('s')) me.humanY += 5 * hs                           // fast-fall
+      if (humanKeys.has('s') && !beamLock) me.humanY += 5 * hs               // fast-fall
       if (me.humanVY >= 0) { const segY = platformFloorAt(me.humanX, me.humanY, prevY); if (segY != null) { me.humanY = segY; me.humanVY = 0; me.humanGround = true; me.humanTossVx = 0; if (me.humanTossKill) { me.humanTossKill = false; humanTakeDmg(99, now); return } } }
       if (me.humanY >= floor) { me.humanY = floor; me.humanVY = 0; me.humanGround = true; me.humanTossVx = 0; if (me.humanTossKill) { me.humanTossKill = false; humanTakeDmg(99, now); return } }
     }
     me.humanX = Math.max(12 * hs, Math.min(W - 12 * hs, me.humanX))
     if (me.humanGround && taskbarHoleAt(me.humanX)) { me.humanFalling = true; me.humanFallVy = 2; me.humanFallStart = now; spawnFallFx(me.humanX, me.humanY); return }   // standing over a hole → fall in
     if (humanKeys.has('e')) me.humanFace = cursor.x >= me.humanX ? 1 : -1   // face the cursor while guarding
+    if ((me.guardHP || 0) <= 0 && me.guardBrokenUntil && now >= me.guardBrokenUntil) { me.guardHP = GUARD_HP; me.guardBrokenUntil = 0 }   // 🛡 가드 재생성
+    if (humanGuarding(now)) {   // 🛡 상대 빔이 내 가드를 때림(가드 내구도는 소유자 판정)
+      const W2 = canvas.clientWidth, H2 = canvas.clientHeight, scG = hs * 0.3
+      const gcy = me.humanY - 34 * hs * 0.7, gAng = Math.atan2(cursor.y - gcy, cursor.x - me.humanX)
+      for (const [pid, rb] of remoteBeams) {
+        if (now - rb.ts > 500) continue
+        const t = rayHitsPlate(rb.nx * W2, rb.ny * H2, Math.cos(rb.ang), Math.sin(rb.ang), me.humanX, gcy, SHIELD_DIST * scG, SHIELD_BAND * scG + 6 * s, gAng, SHIELD_SPAN / 2, Math.hypot(W2, H2), s)
+        if (t != null) guardTakeDmg(BEAM_DPS[(rb.st || 1) - 1] / 60, now, rb.nx * W2 + Math.cos(rb.ang) * t, rb.ny * H2 + Math.sin(rb.ang) * t)
+      }
+    }
+    if (me.beamCharging) me.humanFace = cursor.x >= me.humanX ? 1 : -1      // 🐉 충전 중 커서로 몸통 회전(반대편 넘어가면 flip)
+    else if (me.beam) me.humanFace = Math.cos(me.beam.ang) >= 0 ? 1 : -1    // 🐉 발사 중 빔 방향으로 몸통 고정
     // melee: enemy ANTS touching the human (missiles/bullets/shells collide attacker-side → human-hit). 250ms i-frames.
     if (now >= (me.humanHitCd || 0)) {
       const cx = me.humanX, cy = me.humanY - 15 * hs, r = 20 * hs
@@ -2294,8 +2400,8 @@
         // barrier (cursor-facing, above the human) blocks threats coming from within its arc
         const scx = me.humanX, scy = me.humanY - 34 * hs * 0.7
         const shieldAng = Math.atan2(cursor.y - scy, cursor.x - scx)
-        const blocked = humanKeys.has('e') && angDiff(Math.atan2(ty - scy, tx - scx), shieldAng) <= SHIELD_SPAN / 2
-        if (blocked) { spawnSpark(scx + Math.cos(shieldAng) * 30 * hs, scy + Math.sin(shieldAng) * 30 * hs); me.humanHitCd = now + 150 }
+        const blocked = humanGuarding(now) && angDiff(Math.atan2(ty - scy, tx - scx), shieldAng) <= SHIELD_SPAN / 2
+        if (blocked) { spawnSpark(scx + Math.cos(shieldAng) * 30 * hs, scy + Math.sin(shieldAng) * 30 * hs); me.humanHitCd = now + 150; guardTakeDmg(1, now, scx + Math.cos(shieldAng) * 30 * hs, scy + Math.sin(shieldAng) * 30 * hs) }
         else { humanTakeDmg(1, now, byPid); if (!me.humanActive) return }
       }
     }
@@ -2322,7 +2428,9 @@
     if (me.humanWeapon === 'rifle' && qHeld && now >= (me.humanAtkCd || 0)) {   // full-auto while Q held
       me.humanAtkCd = now + HUMAN_WEAPONS.rifle.cd; me.humanPunchUntil = now + 100; fireHumanBullet(HUMAN_WEAPONS.rifle, now)
     }
-    drawHuman(now, moving && me.humanGround)
+    if (me.beamCharging) { if (beamStage(now - (me.beamChargeStart || now)) >= 3 && !me.beamMaxed) { me.beamMaxed = true; me.beamMaxFlashAt = now } } else me.beamMaxed = false   // 🐉 기 최대 도달 순간
+    me.humanWalking = moving && me.humanGround
+    drawHuman(now, me.humanWalking)
   }
   // human body color follows the cat's fur skin (Stick-Fight-style flat single color)
   const SKIN_BODY = { default: '#e9e9f0', cream: '#ecd6a8', gray: '#aab0bd', brown: '#a06a3a', black: '#3a3a46', orange: '#e79a3c', pink: '#f0abc6', mint: '#9fe3cb', lavender: '#c7b3ef' }
@@ -2355,76 +2463,578 @@
     }
     ctx.restore()
   }
-  function drawHuman(now, walking) {
-    const s = view.scale * HUMAN_SCALE, x = me.humanX, y = me.humanY, f = me.humanFace || 1
-    const H = 34 * s, headR = 6.5 * s, armLen = 11 * s
-    const hipY = -H * 0.42, shoulderY = -H * 0.74, headCY = -H + headR
-    const t = walking ? Math.sin(now / 90) : 0
-    const guarding = humanKeys.has('e'), punching = now < (me.humanPunchUntil || 0)
-    const wk = me.humanWeapon, aiming = wk === 'pistol' || wk === 'rifle' || wk === 'bazooka'
-    const swingP = now < (me.swingUntil || 0) ? 1 - (me.swingUntil - now) / SWING_MS : -1   // 0..1 while swinging
-    const col = humanColor(), outline = 'rgba(0,0,0,0.5)'
-    ctx.save(); ctx.translate(x, y); ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0, 1, 10 * s, 3 * s, 0, 0, Math.PI * 2); ctx.fill()   // shadow
-    // body — thick single color with a dark outline pass for contrast
-    const limbs = (color, lw) => {
-      ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath()
-      ctx.moveTo(0, hipY); ctx.lineTo(t * 6 * s, 0); ctx.moveTo(0, hipY); ctx.lineTo(-t * 6 * s, 0)   // legs
-      ctx.moveTo(0, hipY); ctx.lineTo(0, shoulderY)                                                   // torso
-      ctx.moveTo(0, shoulderY); ctx.lineTo(-f * 5 * s, shoulderY + 9 * s); ctx.stroke()               // back arm
+  // 머리카락: 흑발(기본) → 금발 초사이언(변신 진행 p로 크로스페이드, SSJ일수록 더 길고 뾰족). 두상을 감싸도록 밑동을 머리에 겹침.
+  // ---- 🐉 카메하메파 빔 (초사이언 전용) : Q 홀드 충전(3단계) → 방향 고정 레이저 ----
+  const BEAM_THRESH = [1200, 2600, 4200]   // 홀드 시간(ms) → 단계
+  const BEAM_DUR = [3000, 4000, 5000]      // 단계별 지속(ms)
+  const BEAM_DPS = [3, 6, 10]              // 단계별 초당 데미지(오버레이 개미 HP=1 기준)
+  const BEAM_W = [11, 18, 27]              // 단계별 코어 반경(view.scale 곱) — 굵게
+  let _beamClash = null                    // 🐉 내 빔 ↔ 상대 빔 대치 상태(정면 밀어내기/합체) — drawRemoteBeams와 공유
+  const KI_CD = 500                        // 🐉 R 유도 기 구체 쿨(ms)
+  function beamStage(heldMs) { return heldMs >= BEAM_THRESH[2] ? 3 : heldMs >= BEAM_THRESH[1] ? 2 : heldMs >= 350 ? 1 : 0 }
+  function humanHandPos() { const s = humanEffScale(), f = me.humanFace || 1; return { x: me.humanX + f * 16 * s, y: me.humanY - 34 * s * 0.58 } }
+  function fireBeam(now) {
+    if (weaponsLocked() || !me.ssj) return
+    const st = beamStage(now - (me.beamChargeStart || now)); if (st < 1) return
+    const o = humanHandPos(), ang = Math.atan2(cursor.y - o.y, cursor.x - o.x)
+    me.beam = { ang, st, born: now, until: now + BEAM_DUR[st - 1], ox: o.x, oy: o.y }; me.beamFireAt = now
+  }
+  function stepDevFakeBeam(now) {   // 🛠 dev: 가짜 상대 빔 유지(g=정면 대치, h=합체) — 솔로 테스트용
+    if (!devFakeBeam || !me.humanActive) { if (remoteBeams.has('FAKE')) remoteBeams.delete('FAKE'); return }
+    const W = canvas.clientWidth, H = canvas.clientHeight, s = view.scale
+    const hy = me.humanY - 34 * humanEffScale() * 0.58
+    if (devFakeBeam === 'headon') remoteBeams.set('FAKE', { nx: Math.min(W - 30, me.humanX + 560 * s) / W, ny: hy / H, ang: Math.PI, st: 2, ts: now })
+    else remoteBeams.set('FAKE', { nx: Math.min(W - 30, me.humanX + 70 * s) / W, ny: (hy - 30 * s) / H, ang: 0.1, st: 2, ts: now })
+  }
+  // 빔 한 구간(원점·방향)의 판정: 유닛/실드/땅 스캔 + 데미지·파임 적용. 반환 {len, blocked}
+  // dmgSt = 데미지 산정에 쓸 내 빔 단계(합체 구간도 "내 몫"만 적용 → 클라마다 중복 적용 없음), wSt = 굵기 기준 단계.
+  function beamSegment(ox, oy, ang, wSt, wMul, maxLen, now, dmgSt) {
+    const s = view.scale, W = canvas.clientWidth, H = canvas.clientHeight
+    const dx = Math.cos(ang), dy = Math.sin(ang), w = BEAM_W[wSt - 1] * s * (wMul || 1), rad = w * 1.5
+    const dps = BEAM_DPS[dmgSt - 1] / 60
+    let groundD = Infinity
+    if (dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s) groundD = gd } }
+    let hitD = Infinity, hitApply = null
+    const consider = (tx, ty, apply) => { const t = (tx - ox) * dx + (ty - oy) * dy; if (t < 10 * s || t > maxLen) return; const px = ox + dx * t, py = oy + dy * t; if (Math.hypot(tx - px, ty - py) <= rad && t < hitD) { hitD = t; hitApply = apply } }
+    for (const a of ants) { if (a.dead || a.falling) continue; consider(a.x, a.y - 6 * s, () => { antTakeDmg(a, dps); if (a.dead) addAntKill() }) }
+    for (const [pid, rec] of remoteAnts) for (const a of rec.items.values()) { if (a.dead) continue; const sp = remoteAntScreenPos(pid, a); if (sp) consider(sp.x, sp.y, () => { if (connected()) net.send(JSON.stringify({ t: 'ant-hit', target: pid, ant: a.id, dmg: dps })) }) }
+    for (const [pid, g] of remoteGatlings) consider(g.nx * W, g.ny * H, () => { if (connected()) net.send(JSON.stringify({ t: 'gat-hit', target: pid, dmg: dps })) })
+    for (const [pid, m] of remoteMechas) consider(m.nx * W, m.ny * H - 26 * mechaScale(), () => { if (connected()) net.send(JSON.stringify({ t: 'mecha-hit', target: pid, dmg: dps })) })
+    for (const [pid, h] of remoteHumans) consider(h.nx * W, h.ny * H - 20 * s, () => { if (connected()) net.send(JSON.stringify({ t: 'human-hit', target: pid, dmg: dps, hx: +(h.nx).toFixed(4), hy: +(h.ny).toFixed(4) })) })
+    for (let ci = 0; ci < catPos.length; ci++) { const cat = allRef[ci], c = catPos[ci]; if (!cat || !c) continue; consider(c.x, c.y - 12 * s, () => { if (!catShieldCovers(cat, c, c.x, c.y - 12 * s, now)) applyCatHit(cat, dps, now) }) }   // 상대 곰 + 내 곰
+    let shieldD = Infinity, shieldHit = null   // 🛡 실드(곰 판/상대 인간 가드/메카 돔·본체)가 빔을 막음
+    {
+      const capD = Math.min(maxLen, groundD, hitD), half = SHIELD_SPAN / 2
+      for (let ci = 0; ci < catPos.length; ci++) {
+        const cat = allRef[ci], c = catPos[ci]; if (!cat || !c) continue
+        let until = 0, angP = 0
+        if (cat.id === 'me') { until = me.shieldUntil || 0; angP = me.shieldAngle || 0 }
+        else { const rs = remoteShields.get(cat.id); if (rs) { until = rs.until; angP = rs.angle } }
+        if (now >= until) continue
+        const t = rayHitsPlate(ox, oy, dx, dy, c.x, c.y, SHIELD_DIST * s, SHIELD_BAND * s, angP, half, Math.min(capD, shieldD), s)
+        if (t != null && t < shieldD) { shieldD = t; shieldHit = { kind: 'cat', cat, x: ox + dx * t, y: oy + dy * t } }
+      }
+      for (const [pid, h] of remoteHumans) {   // 상대 인간 가드(E)
+        if (!h.gd) continue
+        const hs2 = s * (HUMAN_SCALE + (SSJ_SCALE - HUMAN_SCALE) * (h.ssj || 0)), sc2 = hs2 * 0.3
+        const t = rayHitsPlate(ox, oy, dx, dy, h.nx * W, h.ny * H - 34 * hs2 * 0.7, SHIELD_DIST * sc2, SHIELD_BAND * sc2 + 6 * s, h.gang || 0, half, Math.min(capD, shieldD), s)
+        if (t != null && t < shieldD) { shieldD = t; shieldHit = { kind: 'guard', x: ox + dx * t, y: oy + dy * t } }
+      }
+      {   // 상대 메카(전개 실드 포함 지오메트리 재사용)
+        const stepM = Math.max(4, 6 * s)
+        for (let t = 12 * s; t < Math.min(capD, shieldD); t += stepM) {
+          const rm = hitRemoteMecha(ox + dx * t, oy + dy * t)
+          if (rm) { shieldD = t; shieldHit = { kind: 'mecha', pid: rm.pid, x: ox + dx * t, y: oy + dy * t }; break }
+        }
+      }
+      if (shieldHit && now >= (me.beamShieldCd || 0)) {   // 실드 내구도 차감(150ms 스로틀 — 합산 시 DPS와 동일)
+        me.beamShieldCd = now + 150
+        const sd = +(BEAM_DPS[dmgSt - 1] * 0.15).toFixed(2)
+        if (shieldHit.kind === 'cat') { if (shieldHit.cat.id === 'me') hitMyShield(sd); else if (connected()) net.send(JSON.stringify({ t: 'shield-hit', target: shieldHit.cat.id, power: sd })) }
+        else if (shieldHit.kind === 'mecha' && connected()) net.send(JSON.stringify({ t: 'mecha-hit', target: shieldHit.pid, dmg: sd }))
+        spawnSpark(shieldHit.x, shieldHit.y)
+      }
     }
-    limbs(outline, 6 * s); limbs(col, 3.8 * s)
-    // front arm angle (facing-space): aim toward cursor for guns; posed for sword/guard/punch
-    let localAng
-    if (aiming) localAng = Math.atan2(cursor.y - (y + shoulderY), (cursor.x - x) * f)
-    else if (wk === 'sword') localAng = swingP >= 0 ? (-2.1 + swingP * 2.7) : -1.15   // overhead → down slash
-    else if (me.charging && me.chargeKind === 'adogen') localAng = Math.atan2(cursor.y - (y + shoulderY), (cursor.x - x) * f)   // aim the ki-blast
-    else if (punching) localAng = 0
-    else if (guarding) localAng = -0.7
-    else localAng = 0.9 + t * 0.3
-    ctx.save(); ctx.scale(f, 1)
-    const hx = Math.cos(localAng) * armLen, hy = shoulderY + Math.sin(localAng) * armLen
-    if (wk === 'sword' && swingP >= 0) {   // slash trail
-      ctx.strokeStyle = 'rgba(190,225,255,0.55)'; ctx.lineWidth = 3.5 * s
-      ctx.beginPath(); ctx.arc(0, shoulderY, armLen + 18 * s, -2.1, localAng); ctx.stroke()
+    const len = Math.min(maxLen, groundD, hitD, shieldD), isGround = groundD <= len && groundD < hitD && groundD < shieldD
+    const ex = ox + dx * len, ey = oy + dy * len
+    if (!isGround && hitApply && hitD <= len + 1) hitApply()
+    if (isGround && isFinite(groundD)) {   // 천천히 깊어지고 깊을수록 옆으로 넓어지는 그릇형 파임
+      const tb = taskbarRect()
+      if (tb) {
+        ensureCarve()
+        const ci = Math.round(ex / CARVE_SEG)
+        const curD = (ci >= 0 && ci < carve.length) ? (carve[ci] || 0) : 0
+        const cr = Math.max(1, Math.round(((11 * s) + curD * 1.15) / CARVE_SEG))
+        const inc = 0.32 * wSt * (wMul || 1), cap = tb.h + 14
+        for (let sIdx = ci - cr; sIdx <= ci + cr; sIdx++) {
+          if (sIdx < 0 || sIdx >= carve.length) continue
+          const fo = 1 - Math.abs(sIdx - ci) / (cr + 1)
+          carve[sIdx] = Math.min(cap, (carve[sIdx] || 0) + inc * fo * fo)
+        }
+        carveDirty = true
+        if (connected() && net && now >= (me.beamDigTx || 0)) {   // 상대 화면에도 같은 자리에 파임(140ms 스로틀, 깊을수록 넓게)
+          me.beamDigTx = now + 140
+          const dp = Math.max(0.15, Math.min(3, (2.7 * wSt * (wMul || 1) - 2) / 12 + curD * 0.015))
+          net.send(JSON.stringify({ t: 'dig', nx: +(ex / W).toFixed(4), power: +dp.toFixed(2) }))
+        }
+        if (Math.floor(now / 70) % 2 === 0) spawnDebris(ex, tb.top + 3, 2, '#3a3a42')
+      }
     }
-    ctx.strokeStyle = outline; ctx.lineWidth = 6 * s; ctx.beginPath(); ctx.moveTo(0, shoulderY); ctx.lineTo(hx, hy); ctx.stroke()
-    ctx.strokeStyle = col; ctx.lineWidth = 3.8 * s; ctx.beginPath(); ctx.moveTo(0, shoulderY); ctx.lineTo(hx, hy); ctx.stroke()
-    if (wk) {
-      ctx.save(); ctx.translate(hx, hy); ctx.rotate(localAng)
-      const L = wk === 'rifle' ? 30 * s : wk === 'bazooka' ? 30 * s : wk === 'sword' ? 22 * s : 13 * s
-      drawWeapon(wk, L)
-      if (wk === 'sword' && me.charging && me.chargeKind === 'sword' && me.charge > 0) {   // charge aura on the blade (no gauge)
-        const g = me.charge
-        ctx.globalAlpha = 0.35 + 0.5 * g; ctx.fillStyle = g >= 1 ? '#8fd0ff' : '#cfe6ff'
-        ctx.beginPath(); ctx.arc(L * 0.75, 0, (3 + g * 7) * s, 0, Math.PI * 2); ctx.fill()
-        if (g >= 1) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#e6f4ff'; ctx.lineWidth = 1.5 * s; ctx.beginPath(); ctx.arc(L * 0.75, 0, 10 * s, 0, Math.PI * 2); ctx.stroke() }
-        ctx.globalAlpha = 1
+    return { len, ex, ey, blocked: isGround || (hitApply && hitD <= len + 1) || (shieldHit && shieldD <= len + 0.5) }
+  }
+  function stepBeam(now) {
+    if (!me.beam) { _beamClash = null; return }
+    if (!me.humanActive || now >= me.beam.until) { me.beam = null; _beamClash = null; me.beamClashFrac = null; return }
+    const b = me.beam, W = canvas.clientWidth, H = canvas.clientHeight, maxD = Math.hypot(W, H)
+    const bc = computeBeamClash(b, now)   // 🐉 대치/합체 먼저 판정(대치 패배 시 내 빔 소멸)
+    if (!me.beam) return
+    const capLen = bc ? Math.min(maxD, bc.lenM) : maxD
+    const r1 = beamSegment(b.ox, b.oy, b.ang, b.st, 1, capLen, now, b.st)
+    const clashed = !!bc && r1.len >= capLen - 0.5   // 대치/합류 지점까지 도달해야 성립
+    if (!clashed) _beamClash = null
+    drawBeam(b, r1.len, r1.ex, r1.ey, !clashed && r1.blocked, now)
+    if (clashed && bc.type === 'merge') {   // 🐉 합체 빔도 실제 판정(내 몫 데미지) — 길이는 막힌 곳까지
+      const r2 = beamSegment(bc.cx, bc.cy, bc.mergeAng, bc.mergeSt, bc.wMul, maxD, now, b.st)
+      bc.mergeLen = r2.len; bc.mergeEx = r2.ex; bc.mergeEy = r2.ey; bc.mergeBlocked = r2.blocked
+    }
+  }
+  // 🐉 내 빔 ↔ 상대 빔들(remoteBeams) 대치. 빔이 3·4개여도 전부 합산:
+  //   같은 편(비슷한 방향)=합체해 세력 합, 반대편(정면)=세력 합끼리 겨뤄 약한 쪽으로 밀림.
+  function computeBeamClash(b, now) {
+    const W = canvas.clientWidth, H = canvas.clientHeight
+    const mox = b.ox, moy = b.oy, mdx = Math.cos(b.ang), mdy = Math.sin(b.ang)
+    const allies = [], foes = []
+    let nearFoe = Infinity
+    for (const [pid, R] of remoteBeams) {
+      if (now - R.ts > 500) continue
+      const rox = R.nx * W, roy = R.ny * H, dax = rox - mox, day = roy - moy, dist = Math.hypot(dax, day) || 1
+      if (mdx * dax + mdy * day <= 0) continue   // 내 빔 앞쪽에 있는 빔만
+      const diff = angDiff(b.ang, R.ang)
+      if (diff > 2.3) { foes.push({ R, dist }); if (dist < nearFoe) nearFoe = dist }
+      else if (diff < 1.0) allies.push({ R, rox, roy })
+    }
+    const strM = b.st + allies.reduce((n, a) => n + (a.R.st || 1), 0)   // 내 편 총 세력
+    const strF = foes.reduce((n, f) => n + (f.R.st || 1), 0)            // 상대 편 총 세력
+    let out = null
+    if (foes.length) {   // 정면 대치 → 세력 차만큼 계속 밀림(평형 정지 없음) → 약한 쪽 코앞까지 밀리면 그 빔 파괴
+      // 밀림 속도: "빔 지속시간이 거의 끝날 무렵" 파괴되도록 역산(세력차 클수록 조금 더 빨리).
+      const imb = (strM - strF) / (strM + strF)   // -1..1 (양수=내가 우세)
+      const dtMs = Math.min(50, now - (me.beamClashT || now)); me.beamClashT = now
+      if (me.beamClashFrac == null) me.beamClashFrac = 0.5
+      const imbA = Math.abs(imb)
+      if (imbA > 0.001) {
+        let foeSt = 1; for (const f of foes) foeSt = Math.max(foeSt, f.R.st || 1)
+        const D = Math.min(BEAM_DUR[b.st - 1], BEAM_DUR[foeSt - 1])       // 짧은 쪽 지속시간 기준
+        const Tres = D * (0.92 - 0.22 * imbA)                              // 지속의 ~70~92% 지점에서 결판
+        const prog = Math.min(1, Math.abs(me.beamClashFrac - 0.5) / 0.36)  // 밀릴수록 가속(평균 1배 → 총 시간 유지)
+        const rate = (0.36 / Tres) * (0.65 + 0.7 * prog)
+        me.beamClashFrac = Math.max(0, Math.min(1, me.beamClashFrac + Math.sign(imb) * rate * dtMs))
+      }
+      const frac = me.beamClashFrac, lenM = Math.max(20 * view.scale, nearFoe * frac)
+      const cx = mox + mdx * lenM, cy = moy + mdy * lenM
+      if (frac <= 0.14) {   // 내 빔이 밀려 터짐(내 캐릭터 코앞) — 상대 화면에서도 같은 계산이라 동일 시점에 소멸
+        beamBreakFx(cx, cy, b.st, b.ang); me.beam = null; me.beamClashFrac = null; _beamClash = null; return null
+      }
+      if (frac >= 0.86) {   // 상대 빔이 밀려 터짐(가짜 dev 빔은 여기서 직접 제거 — 실제 상대는 자기 클라가 스스로 소멸)
+        beamBreakFx(cx, cy, Math.max(1, strF), b.ang + Math.PI); me.beamClashFrac = 0.5
+        if (devFakeBeam && remoteBeams.has('FAKE') && foes.some((f) => f.R === remoteBeams.get('FAKE'))) { devFakeBeam = null; remoteBeams.delete('FAKE') }
+        _beamClash = null; return null
+      }
+      out = { type: 'headon', lenM, cx, cy, ox0: mox, oy0: moy, strM, strF, n: foes.length + allies.length + 1, cut: foes.map((f) => f.R).concat(allies.map((a) => a.R)) }
+    } else if (allies.length) {   // 같은 방향 → 합류점에서 하나의 거대 빔으로 합체
+      me.beamClashFrac = null
+      let sx = mox, sy = moy, vx = Math.cos(b.ang), vy = Math.sin(b.ang), stMax = b.st
+      for (const a of allies) { sx += a.rox; sy += a.roy; vx += Math.cos(a.R.ang); vy += Math.sin(a.R.ang); stMax = Math.max(stMax, a.R.st || 1) }
+      const n = allies.length + 1, cx = sx / n, cy = sy / n
+      out = { type: 'merge', lenM: Math.hypot(cx - mox, cy - moy), cx, cy, ox0: mox, oy0: moy, mergeAng: Math.atan2(vy, vx), mergeSt: Math.min(3, stMax), wMul: 1 + 0.45 * allies.length + 0.12 * (strM - b.st), n, cut: allies.map((a) => a.R) }
+    } else me.beamClashFrac = null
+    _beamClash = out
+    return out
+  }
+  const beamBursts = []   // 🐉 빔 파열 연출 { x, y, born, pw, ang, seeds, embers, pops }
+  function beamBreakFx(x, y, pw, ang) {   // 대치에서 밀려 터진 빔 — 빔 톤(청백 에너지) 대형 파열
+    const seeds = [], embers = [], pops = []
+    for (let i = 0; i < 22; i++) seeds.push({ a: Math.random() * Math.PI * 2, sp: 0.45 + Math.random() * 1.1, len: 0.4 + Math.random() })
+    for (let i = 0; i < 26; i++) { const a = Math.random() * Math.PI * 2, v = (1.4 + Math.random() * 5.2); embers.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 0.6, r: 1.1 + Math.random() * 2.2 }) }
+    for (let i = 0; i < 5; i++) { const a = Math.random() * Math.PI * 2, d = 0.5 + Math.random() * 1.5; pops.push({ a, d, at: 60 + Math.random() * 320, rr: 0.25 + Math.random() * 0.4 }) }
+    beamBursts.push({ x, y, born: performance.now(), pw: Math.max(1, pw), ang: ang || 0, seeds, embers, pops })
+    if (beamBursts.length > 6) beamBursts.shift()
+    spawnSpark(x, y)
+  }
+  function stepBeamBursts(now) {
+    const s = view.scale
+    for (let i = beamBursts.length - 1; i >= 0; i--) {
+      const B = beamBursts[i], LIFE = 950, el = now - B.born, t = el / LIFE
+      if (t >= 1) { beamBursts.splice(i, 1); continue }
+      const R0 = (20 + B.pw * 11) * s, fade = 1 - t, ease = 1 - Math.pow(1 - Math.min(1, t * 1.6), 2)
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'
+      if (t < 0.13) {   // 0) 터지는 순간 백색 섬광
+        const fl = 1 - t / 0.13, fr = R0 * (1.6 + fl * 1.6)
+        const fg = ctx.createRadialGradient(B.x, B.y, 1, B.x, B.y, fr)
+        fg.addColorStop(0, `rgba(255,255,255,${fl})`); fg.addColorStop(0.5, `rgba(230,248,255,${fl * 0.55})`); fg.addColorStop(1, 'rgba(180,230,255,0)')
+        ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(B.x, B.y, fr, 0, Math.PI * 2); ctx.fill()
+      }
+      const cr = R0 * (0.5 + ease * 1.45)   // 1) 코어: 확 부풀었다 사그라듦
+      const g = ctx.createRadialGradient(B.x, B.y, 1, B.x, B.y, cr)
+      g.addColorStop(0, `rgba(255,255,255,${fade})`); g.addColorStop(0.32, `rgba(220,246,255,${fade * 0.85})`)
+      g.addColorStop(0.68, `rgba(120,205,255,${fade * 0.45})`); g.addColorStop(1, 'rgba(70,170,255,0)')
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(B.x, B.y, cr, 0, Math.PI * 2); ctx.fill()
+      for (let k = 0; k < 3; k++) {   // 2) 확장 충격파 링 3겹(시간차)
+        const u = Math.min(1, (t - k * 0.09) * (1.25 + k * 0.35)); if (u <= 0 || u >= 1) continue
+        ctx.strokeStyle = `rgba(200,240,255,${(1 - u) * 0.85})`; ctx.lineWidth = (1 + (1 - u) * 4) * s
+        ctx.beginPath(); ctx.arc(B.x, B.y, R0 * (0.5 + u * 3.1), 0, Math.PI * 2); ctx.stroke()
+      }
+      ctx.save(); ctx.translate(B.x, B.y); ctx.rotate(B.ang)   // 3) 십자 렌즈 플레어(빔 축 기준)
+      const fl2 = Math.max(0, 1 - t * 2.2)
+      if (fl2 > 0) {
+        const LX = R0 * (3.4 + t * 3), LY = R0 * 0.9
+        let lg = ctx.createLinearGradient(-LX, 0, LX, 0); lg.addColorStop(0, 'rgba(160,220,255,0)'); lg.addColorStop(0.5, `rgba(255,255,255,${fl2 * 0.85})`); lg.addColorStop(1, 'rgba(160,220,255,0)')
+        ctx.fillStyle = lg; ctx.fillRect(-LX, -R0 * 0.075 * fl2, LX * 2, R0 * 0.15 * fl2)
+        lg = ctx.createLinearGradient(0, -LY * 2, 0, LY * 2); lg.addColorStop(0, 'rgba(160,220,255,0)'); lg.addColorStop(0.5, `rgba(235,250,255,${fl2 * 0.6})`); lg.addColorStop(1, 'rgba(160,220,255,0)')
+        ctx.fillStyle = lg; ctx.fillRect(-R0 * 0.06 * fl2, -LY * 2, R0 * 0.12 * fl2, LY * 4)
+      }
+      const bl = R0 * (1.2 + ease * 3.4), bg = ctx.createLinearGradient(0, 0, -bl, 0)   // 4) 진 쪽으로 밀려 흩어지는 잔재
+      bg.addColorStop(0, `rgba(235,250,255,${fade * 0.75})`); bg.addColorStop(1, 'rgba(120,200,255,0)')
+      ctx.fillStyle = bg; ctx.beginPath(); ctx.ellipse(-bl * 0.5, 0, bl * 0.5, R0 * 0.55 * fade, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.restore()
+      ctx.lineCap = 'round'
+      for (const sd of B.seeds) {   // 5) 사방으로 흩날리는 에너지 줄기
+        const d = R0 * (0.4 + ease * 3.6 * sd.sp), l = R0 * 0.6 * sd.len * fade
+        const px = B.x + Math.cos(sd.a) * d, py = B.y + Math.sin(sd.a) * d
+        ctx.strokeStyle = `rgba(225,247,255,${fade * 0.9})`; ctx.lineWidth = 2.4 * s * fade
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(sd.a) * l, py + Math.sin(sd.a) * l); ctx.stroke()
+      }
+      for (const P of B.pops) {   // 6) 주변에서 시간차로 터지는 2차 폭발
+        const pt = (el - P.at) / 320; if (pt < 0 || pt > 1) continue
+        const px = B.x + Math.cos(P.a) * R0 * P.d * (0.8 + pt * 0.5), py = B.y + Math.sin(P.a) * R0 * P.d * (0.8 + pt * 0.5)
+        const pr = R0 * P.rr * (0.5 + pt), pf = 1 - pt
+        const pg = ctx.createRadialGradient(px, py, 1, px, py, pr)
+        pg.addColorStop(0, `rgba(255,255,255,${pf * 0.95})`); pg.addColorStop(0.55, `rgba(190,235,255,${pf * 0.5})`); pg.addColorStop(1, 'rgba(110,200,255,0)')
+        ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.fill()
+      }
+      for (const E of B.embers) {   // 7) 흩날리는 에너지 불티(관성+감쇠)
+        E.x += E.vx; E.y += E.vy; E.vx *= 0.94; E.vy = E.vy * 0.94 + 0.06
+        ctx.fillStyle = `rgba(235,250,255,${fade * 0.95})`
+        ctx.beginPath(); ctx.arc(E.x, E.y, E.r * s * fade, 0, Math.PI * 2); ctx.fill()
       }
       ctx.restore()
-    } else {   // unarmed: fist, or a growing 아도겐 ki-ball while charging
-      if (me.charging && me.chargeKind === 'adogen') {
-        const g = me.charge, rr = (4 + g * 12) * s
-        ctx.fillStyle = g >= 1 ? '#9be0ff' : '#cdeeff'; ctx.globalAlpha = 0.4 + 0.5 * g
-        ctx.beginPath(); ctx.arc(hx + 4 * s, hy, rr, 0, Math.PI * 2); ctx.fill()
-        ctx.globalAlpha = 0.9; ctx.strokeStyle = '#eaf8ff'; ctx.lineWidth = 1.5 * s; ctx.beginPath(); ctx.arc(hx + 4 * s, hy, rr, 0, Math.PI * 2); ctx.stroke()
-        ctx.globalAlpha = 1
+    }
+  }
+  function drawBeamClashFx(bc, now) {
+    const s = view.scale
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'
+    if (bc.type === 'merge') {   // 합체: 금빛 초대형 빔(원래 파란 빔과 확실히 구분) + 합류 소용돌이
+      const W = canvas.clientWidth, H = canvas.clientHeight, maxD = Math.hypot(W, H)
+      const mLen = bc.mergeLen != null ? bc.mergeLen : maxD
+      const mex = bc.mergeEx != null ? bc.mergeEx : bc.cx + Math.cos(bc.mergeAng) * mLen
+      const mey = bc.mergeEy != null ? bc.mergeEy : bc.cy + Math.sin(bc.mergeAng) * mLen
+      drawBeam({ ox: bc.cx, oy: bc.cy, ang: bc.mergeAng, st: bc.mergeSt, merged: 1, wMul: bc.wMul }, mLen, mex, mey, !!bc.mergeBlocked, now)
+      const R0 = BEAM_W[bc.mergeSt - 1] * s * (bc.wMul || 1)
+      const r = R0 * 3.2 * (0.9 + 0.15 * Math.sin(now / 40))
+      const g = ctx.createRadialGradient(bc.cx, bc.cy, 2, bc.cx, bc.cy, r)
+      g.addColorStop(0, '#ffffff'); g.addColorStop(0.35, '#fff3b0'); g.addColorStop(0.7, 'rgba(255,196,60,0.55)'); g.addColorStop(1, 'rgba(255,150,20,0)')
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bc.cx, bc.cy, r, 0, Math.PI * 2); ctx.fill()
+      ctx.strokeStyle = 'rgba(255,236,150,0.9)'; ctx.lineWidth = 2.4 * s   // 합류 소용돌이(빨려들어 합쳐지는 느낌)
+      for (let i = 0; i < 5; i++) {
+        const a0 = now / 90 + i * 1.26; ctx.beginPath()
+        for (let k = 0; k <= 10; k++) { const rr = r * (1.5 - k * 0.13), aa = a0 + k * 0.34, px = bc.cx + Math.cos(aa) * rr, py = bc.cy + Math.sin(aa) * rr; if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py) }
+        ctx.stroke()
       }
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(hx, hy, 2.6 * s, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = 'rgba(255,240,170,0.95)'   // 금빛 불티
+      for (let i = 0; i < 10; i++) { const a = now / 70 + i * 0.63, d = r * (0.5 + ((now / 260 + i * 0.1) % 1) * 1.2); ctx.beginPath(); ctx.arc(bc.cx + Math.cos(a) * d, bc.cy + Math.sin(a) * d, 2 * s, 0, Math.PI * 2); ctx.fill() }
+    } else {   // 정면 대치: 커다란 충돌 구체 + 확장 충격파 링 + 압축 원반 + 사방 불티
+      const pw = Math.min(6, bc.strM + bc.strF), r = (18 + pw * 7) * s * (0.92 + 0.12 * Math.sin(now / 34))
+      const g = ctx.createRadialGradient(bc.cx, bc.cy, 2, bc.cx, bc.cy, r)
+      g.addColorStop(0, '#ffffff'); g.addColorStop(0.4, '#dff4ff'); g.addColorStop(0.75, 'rgba(140,215,255,0.55)'); g.addColorStop(1, 'rgba(90,180,255,0)')
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bc.cx, bc.cy, r, 0, Math.PI * 2); ctx.fill()
+      const perp = Math.atan2(bc.cy - bc.oy0, bc.cx - bc.ox0) + Math.PI / 2   // 빔 축에 수직인 압축 원반
+      ctx.save(); ctx.translate(bc.cx, bc.cy); ctx.rotate(perp)
+      const dg = ctx.createLinearGradient(0, -r * 1.5, 0, r * 1.5); dg.addColorStop(0, 'rgba(190,235,255,0)'); dg.addColorStop(0.5, 'rgba(240,252,255,0.85)'); dg.addColorStop(1, 'rgba(190,235,255,0)')
+      ctx.fillStyle = dg; ctx.beginPath(); ctx.ellipse(0, 0, r * 0.42, r * 1.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore()
+      for (let k = 0; k < 3; k++) {   // 확장 충격파 링(계속 퍼져나감)
+        const u = ((now / 420 + k / 3) % 1), rr = r * (1 + u * 2.1)
+        ctx.strokeStyle = `rgba(200,240,255,${(1 - u) * 0.7})`; ctx.lineWidth = (1 + (1 - u) * 3) * s
+        ctx.beginPath(); ctx.arc(bc.cx, bc.cy, rr, 0, Math.PI * 2); ctx.stroke()
+      }
+      ctx.strokeStyle = '#eaf8ff'; ctx.lineWidth = 2.4 * s   // 방사 스파크
+      for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2 + now / 55, rr = r * (0.8 + 0.7 * ((i * 5) % 3) / 2); ctx.beginPath(); ctx.moveTo(bc.cx + Math.cos(a) * r * 0.3, bc.cy + Math.sin(a) * r * 0.3); ctx.lineTo(bc.cx + Math.cos(a) * rr, bc.cy + Math.sin(a) * rr); ctx.stroke() }
+      ctx.fillStyle = 'rgba(235,250,255,0.9)'   // 튀는 불티
+      for (let i = 0; i < 12; i++) { const a = i * 0.52 + now / 120, d = r * (0.9 + ((now / 240 + i * 0.08) % 1) * 1.3); ctx.beginPath(); ctx.arc(bc.cx + Math.cos(a) * d, bc.cy + Math.sin(a) * d, 1.8 * s, 0, Math.PI * 2); ctx.fill() }
     }
     ctx.restore()
-    // head (big round, skin color) + eye
-    ctx.fillStyle = col; ctx.strokeStyle = outline; ctx.lineWidth = 2 * s
-    ctx.beginPath(); ctx.arc(0, headCY, headR, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
-    ctx.fillStyle = '#2a2a30'; ctx.beginPath(); ctx.arc(f * headR * 0.4, headCY, 1.5 * s, 0, Math.PI * 2); ctx.fill()
-    const hpw = 22 * s, hp01 = Math.max(0, (me.humanHp || 0) / HUMAN_HP), by = headCY - headR - 6 * s
+  }
+  function drawBeam(b, len, ex, ey, blocked, now) {
+    const s = view.scale, M = b.merged, w = BEAM_W[b.st - 1] * s * (b.wMul || 1), pulse = 0.85 + 0.15 * Math.sin(now / 55)
+    // 팔레트: 기본=하늘색 / 합체=금빛(확실히 구분)
+    const C = M
+      ? { aura0: 'rgba(255,120,0,0)', aura1: `rgba(255,190,60,${0.42 * pulse})`, mid0: 'rgba(255,210,90,0)', mid1: '#ffd257', spiral: 'rgba(255,246,190,0.95)', muzzle: 'rgba(255,190,60,0)' }
+      : { aura0: 'rgba(40,140,255,0)', aura1: `rgba(95,195,255,${0.32 * pulse})`, mid0: 'rgba(120,210,255,0)', mid1: '#7fd4ff', spiral: 'rgba(205,242,255,0.85)', muzzle: 'rgba(140,224,255,0)' }
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.translate(b.ox, b.oy); ctx.rotate(b.ang)
+    // 1) 외곽 오라(가장 넓고 은은, 맥동)
+    const AW = M ? 4.2 : 3
+    let g = ctx.createLinearGradient(0, -w * AW, 0, w * AW); g.addColorStop(0, C.aura0); g.addColorStop(0.5, C.aura1); g.addColorStop(1, C.aura0)
+    ctx.fillStyle = g; ctx.fillRect(0, -w * AW, len, w * AW * 2)
+    // 2) 중간층
+    g = ctx.createLinearGradient(0, -w * 1.5, 0, w * 1.5); g.addColorStop(0, C.mid0); g.addColorStop(0.5, C.mid1); g.addColorStop(1, C.mid0)
+    ctx.fillStyle = g; ctx.fillRect(0, -w * 1.5, len, w * 3)
+    if (M) {   // 합체 전용: 금빛 안쪽 층 하나 더(백열 느낌)
+      g = ctx.createLinearGradient(0, -w * 0.95, 0, w * 0.95); g.addColorStop(0, 'rgba(255,238,150,0)'); g.addColorStop(0.5, '#fff0b0'); g.addColorStop(1, 'rgba(255,238,150,0)')
+      ctx.fillStyle = g; ctx.fillRect(0, -w * 0.95, len, w * 1.9)
+    }
+    // 3) 코어(흰색, 맥동)
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, -w * (M ? 0.62 : 0.55) * pulse, len, w * (M ? 1.24 : 1.1) * pulse)
+    // 4) 나선(합체=3줄 더 촘촘) — 감기는 에너지
+    ctx.strokeStyle = C.spiral; ctx.lineWidth = (M ? 3 : 2.2) * s
+    const PH = M ? 3 : 2
+    for (let ph = 0; ph < PH; ph++) { ctx.beginPath(); for (let i = 0; i <= len; i += 9 * s) { const yy = Math.sin(i * (M ? 0.032 : 0.045) - now / (M ? 34 : 45) + (ph * Math.PI * 2) / PH) * w * 0.92; if (i === 0) ctx.moveTo(i, yy); else ctx.lineTo(i, yy) } ctx.stroke() }
+    // 5) 진행 펄스(원점→끝으로 흐르는 밝은 링)
+    ctx.fillStyle = M ? 'rgba(255,246,190,0.9)' : 'rgba(255,255,255,0.85)'
+    const NP = M ? 5 : 3
+    for (let kk = 0; kk < NP; kk++) { const pp = ((now / (M ? 150 : 210) + kk / NP) % 1) * len, pr = w * (1.05 + 0.5 * Math.sin(now / 70 + kk)); ctx.beginPath(); ctx.ellipse(pp, 0, pr * 0.45, pr, 0, 0, Math.PI * 2); ctx.fill() }
+    // 6) 머즐 플래시
+    const mg = ctx.createRadialGradient(0, 0, 2, 0, 0, w * 3.4); mg.addColorStop(0, '#ffffff'); if (M) mg.addColorStop(0.45, 'rgba(255,225,120,0.7)'); mg.addColorStop(1, C.muzzle)
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(0, 0, w * 3.4, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+    if (blocked) {   // 충돌 폭발
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.translate(ex, ey)
+      const br = w * 2.8 * (0.85 + 0.25 * Math.sin(now / 26))
+      const g2 = ctx.createRadialGradient(0, 0, 2, 0, 0, br); g2.addColorStop(0, '#ffffff'); g2.addColorStop(0.5, '#bfe9ff'); g2.addColorStop(1, 'rgba(120,200,255,0)')
+      ctx.fillStyle = g2; ctx.beginPath(); ctx.arc(0, 0, br, 0, Math.PI * 2); ctx.fill()
+      ctx.strokeStyle = '#eaf8ff'; ctx.lineWidth = 2.4 * s
+      for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 + now / 80, r = br * (0.7 + 0.55 * ((i * 5) % 3) / 2); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); ctx.stroke() }
+      ctx.restore()
+    }
+  }
+  function drawHumanHair(ctx, hx, hy, hr, p, s, now) {
+    // 실제 머리 실루엣(효과 아님): 크고 날카로운 삼각 스파이크가 위로 치솟는 클래식 SSJ 머리 하나의 도형.
+    // 스파이크 높이는 흑발(base)→SSJ(ssj)로 p에 따라 증가. [fx(hr배수), 높이배수]
+    const H = (base, ssj) => base + (ssj - base) * p
+    const pts = [
+      [-1.02, 0], [-0.88, H(0.5, 1.75)], [-0.6, H(0.12, 0.55)], [-0.46, H(0.75, 2.45)],
+      [-0.18, H(0.16, 0.65)], [-0.05, H(0.9, 3.1)], [0.22, H(0.18, 0.8)], [0.35, H(0.66, 2.45)],
+      [0.62, H(0.14, 0.6)], [0.78, H(0.44, 1.7)], [1.02, 0]
+    ]
+    const crownY = (fx) => hy - hr * 0.9 * Math.cos(fx * 1.02)   // 머리 윗곡선 근사(가장자리 낮고 가운데 높음)
+    function build() {
+      ctx.beginPath()
+      for (let i = 0; i < pts.length; i++) { const [fx, up] = pts[i]; const px = hx + fx * hr, py = crownY(fx) - up * hr; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py) }
+      ctx.lineTo(hx + hr * 0.98, hy + hr * 0.2); ctx.lineTo(hx - hr * 0.98, hy + hr * 0.2); ctx.closePath()   // 머리 옆·뒤로 닫아 크라운을 꽉 채움
+    }
+    ctx.save(); ctx.lineJoin = 'round'
+    build(); ctx.fillStyle = '#17171c'; ctx.globalAlpha = 1 - p; ctx.fill()        // 흑발(페이드아웃)
+    build(); ctx.globalAlpha = p; ctx.fillStyle = '#ffdb3d'; ctx.fill()             // 금발(페이드인)
+    if (p > 0.02) { build(); ctx.globalAlpha = p; ctx.strokeStyle = '#e0a800'; ctx.lineWidth = 1.5 * s; ctx.stroke() }   // 금발 윤곽(입체감)
+    ctx.restore()
+  }
+  // 초사이언 오라: 사방으로 뾰족한 불꽃(위로 더 길게, 일렁임). 몸통 뒤에 그림.
+  function drawSSJAura(ctx, s, p, now) {
+    // 온몸을 감싸는 불꽃 오라: 몸 실루엣(타원) 둘레에서 바깥+위로 치솟는 불길 혀들. 바닥 의존 X → 공중에서도 자연스러움.
+    const cx = 0, cy = -34 * s, rx = 15 * s, ry = 34 * s    // 발끝 0 ~ 머리 -66 → 몸 중심/근사 실루엣
+    ctx.save(); ctx.globalAlpha = 0.62 * p; ctx.globalCompositeOperation = 'lighter'
+    // 온몸 내부 발광
+    const bg = ctx.createRadialGradient(cx, cy, 2 * s, cx, cy, ry * 1.15)
+    bg.addColorStop(0, 'rgba(255,238,160,0.5)'); bg.addColorStop(0.6, 'rgba(255,205,70,0.26)'); bg.addColorStop(1, 'rgba(200,226,58,0)')
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.ellipse(cx, cy, rx * 1.55, ry * 1.12, 0, 0, Math.PI * 2); ctx.fill()
+    // 실루엣 둘레로 바깥+위로 치솟는 불길 혀
+    const N = 22
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2
+      const rootx = cx + Math.cos(a) * rx, rooty = cy + Math.sin(a) * ry
+      let dirx = Math.cos(a), diry = Math.sin(a) - 0.95     // 바깥 법선 + 위쪽 바이어스
+      const dl = Math.hypot(dirx, diry) || 1; dirx /= dl; diry /= dl
+      const flick = 0.62 + 0.38 * Math.sin(now / 78 + i * 1.7)
+      const h = (9 + 21 * flick) * s, w = (1.8 + 2.6 * flick) * s
+      const tx = rootx + dirx * h + Math.sin(now / 105 + i) * 3 * s, ty = rooty + diry * h
+      const px = -diry, py = dirx                            // 폭 방향(법선 수직)
+      const grad = ctx.createLinearGradient(rootx, rooty, tx, ty)
+      grad.addColorStop(0, 'rgba(255,150,20,0.85)'); grad.addColorStop(0.5, '#ffe14d'); grad.addColorStop(1, 'rgba(200,226,58,0)')
+      ctx.fillStyle = grad
+      ctx.beginPath(); ctx.moveTo(rootx - px * w, rooty - py * w)
+      ctx.quadraticCurveTo(rootx + dirx * h * 0.5 - px * w * 0.3, rooty + diry * h * 0.5 - py * w * 0.3, tx, ty)
+      ctx.quadraticCurveTo(rootx + dirx * h * 0.5 + px * w * 0.3, rooty + diry * h * 0.5 + py * w * 0.3, rootx + px * w, rooty + py * w)
+      ctx.closePath(); ctx.fill()
+    }
+    ctx.restore()
+  }
+  // ---- 인간 피규어(오공풍) SVG → 이미지 래스터. 컨셉과 동일하게 나오도록 SVG로 그려 캔버스에 그린다. 흑발/금발 두 버전. ----
+  // 승인된 측면(오른쪽 보기) 오공풍 도복 캐릭터. viewBox 220x380, 발끝 ~y370, 척추 중심 ~x110. 오라는 캔버스(drawSSJAura)로 별도.
+  function humanFigureSVG(mode) {
+    const hair = mode === 'gold'
+      ? '<path d="M142,70 L152,22 L136,50 L128,10 L116,46 L100,12 L90,50 L70,26 L76,74 L86,106 L104,122 L110,106 C98,98 94,84 98,74 C106,62 128,60 142,70 Z" fill="url(#hg)" stroke="#b87f00" stroke-width="2.6" stroke-linejoin="round"/>'
+      : '<path d="M140,72 L148,38 L134,58 L126,26 L116,54 L102,28 L94,56 L78,40 L82,76 L88,104 L104,120 L110,106 C100,98 96,86 100,76 C106,66 126,64 140,72 Z" fill="#1c1c24" stroke="#000" stroke-width="2.6" stroke-linejoin="round"/><g fill="none" stroke="#33333f" stroke-width="1.8" opacity="0.7"><path d="M116,54 L114,76"/><path d="M130,58 L126,78"/><path d="M100,56 L104,76"/></g>'
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 380">'
+      + '<defs>'
+      + '<linearGradient id="gi" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c85a12"/><stop offset="0.5" stop-color="#ee7b1e"/><stop offset="1" stop-color="#ff9a33"/></linearGradient>'
+      + '<linearGradient id="sk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#e0ab78"/><stop offset="0.6" stop-color="#f6d0a4"/><stop offset="1" stop-color="#f6d0a4"/></linearGradient>'
+      + '<linearGradient id="hg" x1="0" y1="1" x2="0.3" y2="0"><stop offset="0" stop-color="#e0a800"/><stop offset="0.5" stop-color="#ffd21a"/><stop offset="1" stop-color="#fff0a0"/></linearGradient>'
+      + '</defs>'
+      + '<g stroke="#3a2412" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">'
+      + '<path d="M94,236 C88,290 84,322 82,354 L106,354 L110,300 L106,236 Z" fill="#b85014"/><path d="M78,348 L114,348 L114,370 C114,375 76,375 74,370 Z" fill="#245092"/>'
+      + '<path d="M114,236 C114,294 118,324 122,356 L148,356 L140,300 L132,236 Z" fill="url(#gi)"/><path d="M118,350 L154,350 L154,372 C154,377 116,377 114,372 Z" fill="#2f6bd8"/>'
+      + '<path d="M116,146 C132,164 138,196 132,226 C129,240 116,242 110,230 C116,200 108,170 104,158 Z" fill="#c96a1a"/><circle cx="122" cy="232" r="10" fill="#245092"/>'
+      + '<path d="M86,146 C80,196 84,228 100,248 L142,244 C154,216 154,178 144,146 C124,137 102,137 86,146 Z" fill="url(#gi)"/>'
+      + '<path d="M136,150 C142,178 142,204 136,228" fill="none" stroke="#2f6bd8" stroke-width="7"/>'
+      + '<rect x="84" y="230" width="60" height="18" rx="5" fill="#2f6bd8" transform="rotate(-6 114 239)"/>'
+      + '<path d="M104,148 C94,180 98,212 106,236 C110,250 126,248 126,234 C122,206 120,176 128,156 Z" fill="url(#gi)"/>'
+      + '<path d="M106,198 C102,218 106,232 108,240 C116,236 122,222 120,206 Z" fill="url(#sk)"/>'
+      + '<rect x="102" y="232" width="22" height="15" rx="4" fill="#2f6bd8" transform="rotate(6 113 239)"/><circle cx="113" cy="256" r="12" fill="url(#sk)"/>'
+      + '<path d="M110,120 L128,120 L128,146 L110,148 Z" fill="url(#sk)"/><ellipse cx="116" cy="92" rx="27" ry="31" fill="url(#sk)"/>'
+      + '</g>' + hair + '</svg>'
+  }
+  const _figImg = {}
+  function humanFigureImg(mode) {
+    if (_figImg[mode]) return _figImg[mode]
+    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(humanFigureSVG(mode))
+    _figImg[mode] = img; return img
+  }
+  function hexShade(hex, f) {   // f>0 밝게, f<0 어둡게
+    const h = (hex || '#ee7b1e').replace('#', ''); let r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16)
+    if (f >= 0) { r += (255 - r) * f; g += (255 - g) * f; b += (255 - b) * f } else { r *= (1 + f); g *= (1 + f); b *= (1 + f) }
+    const c = (v) => ('0' + Math.round(Math.max(0, Math.min(255, v))).toString(16)).slice(-2)
+    return '#' + c(r) + c(g) + c(b)
+  }
+  // ---- 측면 캐릭터 부위별 조각(리깅용). 각 조각은 220x380 캔버스에 해당 부위만 그림(관절 회전용). col=도복 색(스킨 색과 일치). ----
+  function humanPartSVG(part, mode, col) {
+    col = col || '#ee7b1e'
+    const giD = hexShade(col, -0.3), giL = hexShade(col, 0.22), farA = hexShade(col, -0.18), farL = hexShade(col, -0.28)
+    const DEFS = '<defs>'
+      + `<linearGradient id="gi" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${giD}"/><stop offset="0.5" stop-color="${col}"/><stop offset="1" stop-color="${giL}"/></linearGradient>`
+      + '<linearGradient id="sk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#e0ab78"/><stop offset="0.6" stop-color="#f6d0a4"/><stop offset="1" stop-color="#f6d0a4"/></linearGradient>'
+      + '<linearGradient id="hg" x1="0" y1="1" x2="0.3" y2="0"><stop offset="0" stop-color="#e0a800"/><stop offset="0.5" stop-color="#ffd21a"/><stop offset="1" stop-color="#fff0a0"/></linearGradient>'
+      + '</defs>'
+    const S = 'stroke="#3a2412" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"'
+    let body = ''
+    if (part === 'farArm') body = `<path d="M116,146 C132,164 138,196 132,226 C129,240 116,242 110,230 C116,200 108,170 104,158 Z" fill="${farA}" ${S}/><circle cx="122" cy="232" r="10" fill="#245092" ${S}/>`
+    else if (part === 'farLeg') body = `<path d="M94,236 C88,290 84,322 82,354 L106,354 L110,300 L106,236 Z" fill="${farL}" ${S}/><path d="M78,348 L114,348 L114,370 C114,375 76,375 74,370 Z" fill="#245092" ${S}/>`
+    else if (part === 'nearLeg') body = `<path d="M114,236 C114,294 118,324 122,356 L148,356 L140,300 L132,236 Z" fill="url(#gi)" ${S}/><path d="M118,350 L154,350 L154,372 C154,377 116,377 114,372 Z" fill="#2f6bd8" ${S}/>`
+    else if (part === 'torso') body = `<path d="M86,146 C80,196 84,228 100,248 L142,244 C154,216 154,178 144,146 C124,137 102,137 86,146 Z" fill="url(#gi)" ${S}/><path d="M136,150 C142,178 142,204 136,228" fill="none" stroke="#2f6bd8" stroke-width="7"/><rect x="84" y="230" width="60" height="18" rx="5" fill="#2f6bd8" transform="rotate(-6 114 239)" ${S}/>`
+    else if (part === 'nearArm') body = `<path d="M104,148 C94,180 98,212 106,236 C110,250 126,248 126,234 C122,206 120,176 128,156 Z" fill="url(#gi)" ${S}/><path d="M106,198 C102,218 106,232 108,240 C116,236 122,222 120,206 Z" fill="url(#sk)"/><rect x="102" y="232" width="22" height="15" rx="4" fill="#2f6bd8" transform="rotate(6 113 239)"/><circle cx="113" cy="256" r="12" fill="url(#sk)" ${S}/>`
+    else if (part === 'head') {
+      const hair = mode === 'gold'
+        ? '<path d="M142,70 L152,22 L136,50 L128,10 L116,46 L100,12 L90,50 L70,26 L76,74 L86,106 L104,122 L110,106 C98,98 94,84 98,74 C106,62 128,60 142,70 Z" fill="url(#hg)" stroke="#b87f00" stroke-width="2.6" stroke-linejoin="round"/>'
+        : '<path d="M140,72 L148,38 L134,58 L126,26 L116,54 L102,28 L94,56 L78,40 L82,76 L88,104 L104,120 L110,106 C100,98 96,86 100,76 C106,66 126,64 140,72 Z" fill="#1c1c24" stroke="#000" stroke-width="2.6" stroke-linejoin="round"/>'
+      body = `<path d="M110,120 L128,120 L128,146 L110,148 Z" fill="url(#sk)" ${S}/><ellipse cx="116" cy="92" rx="27" ry="31" fill="url(#sk)" ${S}/>` + hair
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 380">${DEFS}${body}</svg>`
+  }
+  const _partImg = {}
+  function humanPartImg(part, mode, col) {
+    const isHead = part === 'head'
+    const key = part + (isHead ? mode : (col || 'def'))   // 머리=색 무관, 도복 부위=색별 캐싱
+    if (_partImg[key]) return _partImg[key]
+    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(humanPartSVG(part, mode, isHead ? undefined : col))
+    _partImg[key] = img; return img
+  }
+  // 로컬·원격 공용 인간 피규어 렌더. D = 상태 객체(위치/스케일/포즈/오라/구체 등). me.* 직접 참조 없음 → 상대 human도 동일하게 그림.
+  function renderHumanFigure(D, now) {
+    const s = D.s, x = D.x, y = D.y, f = D.f || 1, p = D.p || 0, H = 34 * s, flying = D.flying, col = D.col
+    if (D.flyTrail && D.flyTrail.length > 1) {   // 🐉 부스트 띠
+      const tr = D.flyTrail, n = tr.length, HW = 11 * s
+      const perp = (i) => { const a = tr[Math.max(0, i - 1)], b = tr[Math.min(n - 1, i + 1)]; let dx = b.x - a.x, dy = b.y - a.y; const dl = Math.hypot(dx, dy) || 1; return { px: -dy / dl, py: dx / dl } }
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.beginPath()
+      for (let i = 0; i < n; i++) { const pt = tr[i], w = HW * (i / (n - 1)), pp = perp(i); if (i === 0) ctx.moveTo(pt.x + pp.px * w, pt.y + pp.py * w); else ctx.lineTo(pt.x + pp.px * w, pt.y + pp.py * w) }
+      for (let i = n - 1; i >= 0; i--) { const pt = tr[i], w = HW * (i / (n - 1)), pp = perp(i); ctx.lineTo(pt.x - pp.px * w, pt.y - pp.py * w) }
+      ctx.closePath()
+      const g = ctx.createLinearGradient(tr[0].x, tr[0].y, tr[n - 1].x, tr[n - 1].y)
+      g.addColorStop(0, 'rgba(150,225,255,0)'); g.addColorStop(0.6, 'rgba(190,238,255,0.4)'); g.addColorStop(1, 'rgba(240,252,255,0.7)')
+      ctx.fillStyle = g; ctx.fill(); ctx.restore()
+    }
+    if (flying && D.flyAfter && D.flyAfter.length) {   // 🐉 비행 잔상
+      const kk = (66 * s) / 380, hd = humanPartImg('head', p > 0.5 ? 'gold' : 'black'), to = humanPartImg('torso', null, col)
+      for (let gi = 0; gi < D.flyAfter.length; gi++) {
+        const gh = D.flyAfter[gi]; if (now - gh.born > 260) continue
+        ctx.save(); ctx.globalAlpha = 0.04 + 0.13 * (gi / D.flyAfter.length); ctx.globalCompositeOperation = 'lighter'
+        ctx.translate(gh.x, gh.y); ctx.rotate(gh.rot || 0); ctx.scale(gh.f || 1, 1); ctx.scale(kk, kk); ctx.translate(-110, -370)
+        if (to.complete && to.naturalWidth) ctx.drawImage(to, 0, 0, 220, 380)
+        if (hd.complete && hd.naturalWidth) ctx.drawImage(hd, 0, 0, 220, 380)
+        ctx.restore()
+      }
+    }
+    ctx.save(); ctx.translate(x, y); ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+    if (flying) ctx.rotate(D.flyRot || 0)   // 🐉 비행: 진행 방향으로 몸 정렬(슈퍼맨)
+    if (p > 0.02) drawSSJAura(ctx, s, p, now)
+    if (!flying) { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0, 1, 10 * s, 3 * s, 0, 0, Math.PI * 2); ctx.fill() }
+    const FIGH = 66 * s
+    const t = D.walking ? Math.sin(now / 120) : 0
+    const bob = D.walking ? Math.abs(Math.sin(now / 120)) * 1.6 * s : (flying ? Math.sin(now / 380) * 2.2 * s : 0)
+    const P = { farArm: humanPartImg('farArm', null, col), farLeg: humanPartImg('farLeg', null, col), nearLeg: humanPartImg('nearLeg', null, col), torso: humanPartImg('torso', null, col), nearArm: humanPartImg('nearArm', null, col), headB: humanPartImg('head', 'black'), headG: humanPartImg('head', 'gold') }
+    if (!P.torso.complete || !P.torso.naturalWidth) {   // 로딩 전 폴백
+      ctx.fillStyle = '#df6a2a'; ctx.fillRect(-6 * s, -H, 12 * s, H - 6 * s)
+      ctx.fillStyle = '#f6d0a4'; ctx.beginPath(); ctx.arc(0, -H - 6 * s, 9 * s, 0, Math.PI * 2); ctx.fill()
+    } else {
+      ctx.save(); ctx.translate(0, -bob); ctx.scale(f, 1)
+      const k = FIGH / 380; ctx.scale(k, k); ctx.translate(-110, -370)
+      const part = (img, jx, jy, ang, alpha) => {
+        if (!img || !img.complete || !img.naturalWidth) return
+        ctx.save(); if (alpha != null) ctx.globalAlpha = alpha
+        if (ang) { ctx.translate(jx, jy); ctx.rotate(ang); ctx.translate(-jx, -jy) }
+        ctx.drawImage(img, 0, 0, 220, 380); ctx.restore()
+      }
+      let faA = D.faA, naA = D.naA
+      if (faA == null) { faA = -t * 0.32; naA = t * 0.32 }
+      part(P.farArm, 114, 152, faA)
+      part(P.farLeg, 100, 242, t * 0.42)
+      part(P.nearLeg, 130, 242, -t * 0.42)
+      part(P.torso, 0, 0, 0)
+      part(P.headB, 0, 0, 0, 1 - p)
+      if (p > 0.02) part(P.headG, 0, 0, 0, p)
+      part(P.nearArm, 110, 152, naA)
+      ctx.restore()
+    }
+    if (D.orb) {   // 🐉/🔵 기 충전 구체
+      const beam = D.orb.beam, amt = D.orb.amt, st = D.orb.st, maxR = beam ? 22 : 12
+      const ox = -f * 11 * s, oy = -H * 0.66, rr = (4 + amt * maxR) * s
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'
+      const g = ctx.createRadialGradient(ox, oy, 1, ox, oy, rr); g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, '#cfeeff'); g.addColorStop(1, 'rgba(70,185,255,0)')
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ox, oy, rr, 0, Math.PI * 2); ctx.fill()
+      if (st >= 2 || (!beam && amt > 0.55)) { ctx.strokeStyle = 'rgba(234,248,255,0.85)'; ctx.lineWidth = 1.1 * s; const n = beam ? st * 2 : 3; for (let i = 0; i < n; i++) { const a = now / 55 + i * 2.6; ctx.beginPath(); ctx.moveTo(ox + Math.cos(a) * rr * 0.9, oy + Math.sin(a) * rr * 0.9); ctx.lineTo(ox + Math.cos(a) * rr * 1.28, oy + Math.sin(a) * rr * 1.28); ctx.stroke() } }
+      ctx.fillStyle = 'rgba(210,240,255,0.9)'
+      for (let i = 0; i < 5; i++) { const a = now / 120 + i * 1.6, d = rr * (1.8 - ((now / 300 + i * 0.2) % 1) * 1.3); ctx.beginPath(); ctx.arc(ox + Math.cos(a) * d, oy + Math.sin(a) * d, 1.3 * s, 0, Math.PI * 2); ctx.fill() }
+      if (st >= 3) {
+        const pz = 0.7 + 0.3 * Math.sin(now / 90)
+        ctx.strokeStyle = `rgba(150,225,255,${0.5 * pz})`; ctx.lineWidth = 2 * s
+        ctx.beginPath(); ctx.arc(ox, oy, rr * (1.35 + 0.12 * Math.sin(now / 70)), 0, Math.PI * 2); ctx.stroke()
+        ctx.strokeStyle = `rgba(220,245,255,${0.8 * pz})`; ctx.lineWidth = 1.6 * s
+        for (let i = 0; i < 6; i++) { const a = -Math.PI / 2 + (i - 2.5) * 0.34 + Math.sin(now / 60 + i) * 0.08, l = rr * (1.5 + 0.5 * ((now / 90 + i) % 1)); ctx.beginPath(); ctx.moveTo(ox + Math.cos(a) * rr, oy + Math.sin(a) * rr); ctx.lineTo(ox + Math.cos(a) * l, oy + Math.sin(a) * l); ctx.stroke() }
+      }
+      ctx.restore()
+    }
+    if (D.beamMaxFlashAt && now - D.beamMaxFlashAt < 460) {
+      const u = 1 - (now - D.beamMaxFlashAt) / 460, cy = -H * 0.62, rad = (0.4 + (1 - u) * 1.6) * H
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'
+      ctx.strokeStyle = `rgba(180,235,255,${u * 0.9})`; ctx.lineWidth = (1.5 + u * 3.5) * s
+      ctx.beginPath(); ctx.arc(0, cy, rad, 0, Math.PI * 2); ctx.stroke()
+      const cg = ctx.createRadialGradient(0, cy, 2, 0, cy, rad * 0.9); cg.addColorStop(0, `rgba(255,255,255,${u * 0.85})`); cg.addColorStop(0.5, `rgba(190,233,255,${u * 0.5})`); cg.addColorStop(1, 'rgba(150,220,255,0)')
+      ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(0, cy, rad * 0.9, 0, Math.PI * 2); ctx.fill()
+      ctx.strokeStyle = `rgba(234,248,255,${u})`; ctx.lineWidth = 1.6 * s
+      for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 + now / 120; ctx.beginPath(); ctx.moveTo(Math.cos(a) * rad * 0.5, cy + Math.sin(a) * rad * 0.5); ctx.lineTo(Math.cos(a) * rad, cy + Math.sin(a) * rad); ctx.stroke() }
+      ctx.restore()
+    }
+    const hpw = 22 * s, hp01 = D.hp01, by = -FIGH - 4 * s - bob
     ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(-hpw / 2, by, hpw, 3 * s)
     ctx.fillStyle = hp01 > 0.3 ? '#7ecb7e' : '#d05555'; ctx.fillRect(-hpw / 2, by, hpw * hp01, 3 * s)
-    ctx.restore()
-    if (guarding) {   // 🛡 cat-shield-style barrier above the human, orbiting toward the cursor
-      const scx = x, scy = y - H * 0.7, ang = Math.atan2(cursor.y - scy, cursor.x - scx)
-      drawShield(scx, scy, ang, 0.95, view.scale * HUMAN_SCALE * 0.24, 1)
+    if (D.ssjFlashAt && now - D.ssjFlashAt < 240) {
+      const u = 1 - (now - D.ssjFlashAt) / 240; ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = u * 0.85
+      const fg = ctx.createRadialGradient(0, -FIGH * 0.5, 2, 0, -FIGH * 0.5, FIGH * (0.6 + u)); fg.addColorStop(0, '#fffbe0'); fg.addColorStop(1, 'rgba(255,240,150,0)')
+      ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(0, -FIGH * 0.5, FIGH * (0.6 + u), 0, Math.PI * 2); ctx.fill(); ctx.restore()
     }
+    ctx.restore()
+    if (D.guarding) {   // 🛡 가드: 캐릭터 크기(SSJ 포함) 비례 + HP 게이지 반영
+      const scy = y - H * 0.7
+      const ang = D.guardAng != null ? D.guardAng : Math.atan2(cursor.y - scy, cursor.x - x)
+      drawShield(x, scy, ang, 0.95, s * 0.3, D.guardHp01 != null ? D.guardHp01 : 1)
+    }
+  }
+  // 로컬 인간: me.*에서 포즈/구체 계산 → 공용 렌더러 호출
+  function humanArmPose(now, f, t) {   // 로컬 팔 포즈 각도(공용 계산 — 발사/충전/비행)
+    const adogenCharge = me.charging && me.chargeKind === 'adogen'
+    const kiCharging = me.beamCharging || adogenCharge
+    const firing = !!me.beam || (me.humanFireAt && now - me.humanFireAt < 240)
+    const kiFiring = me.kiFireAt && now - me.kiFireAt < 220
+    if (kiFiring) { const aa = Math.atan2(-f * Math.cos(me.kiFireAng || 0), Math.sin(me.kiFireAng || 0)); return { faA: aa, naA: aa } }
+    if (firing) return { faA: -1.52, naA: -1.32 }
+    if (kiCharging) return { faA: 0.82, naA: 0.68 }
+    if (me.humanFlying && me.flyMoving) return { faA: 3.02, naA: 3.28 }
+    return { faA: -t * 0.32, naA: t * 0.32 }
+  }
+  function drawHuman(now, walking) {
+    const s = humanEffScale(), f = me.humanFace || 1, p = me.ssjP || 0
+    const t = walking ? Math.sin(now / 120) : 0
+    const pose = humanArmPose(now, f, t)
+    const adogenCharge = me.charging && me.chargeKind === 'adogen'
+    let orb = null
+    if (me.beamCharging || adogenCharge) {
+      const beam = me.beamCharging, held = now - (me.beamChargeStart || now)
+      orb = { beam, amt: beam ? Math.min(1, held / BEAM_THRESH[2]) : (me.charge || 0), st: beam ? beamStage(held) : 0 }
+    }
+    renderHumanFigure({
+      x: me.humanX, y: me.humanY, s, f, p, walking,
+      flying: me.humanFlying, flyRot: me.flyRot || 0, flyMoving: me.flyMoving, flyAfter: me.flyAfter, flyTrail: me.flyTrail,
+      faA: pose.faA, naA: pose.naA, orb,
+      hp01: Math.max(0, (me.humanHp || 0) / HUMAN_HP), col: humanColor(),
+      ssjFlashAt: me.ssjFlashAt, beamMaxFlashAt: me.beamMaxFlashAt,
+      guarding: humanGuarding(now), guardHp01: (me.guardHP || 0) / GUARD_HP
+    }, now)
   }
 
   // ---------- 🐜🤖 ant MECHA — merge 10 ants (Q) into a big metal ant with a back cannon + dome shield ----------
@@ -2442,6 +3052,7 @@
   const HF_GRAV = 0.42, HF_HSPD = 4.2, HF_DOWN = 6, HF_LIFT = 1.5   // booster flight: gravity / horizontal / fast-descend / peak thrust accel (ramps up while held)
   const energyShots = []            // { x, y, vx, vy, hp, power, born, life }
   const interceptors = []           // { x, y, vx, vy, born, life }
+  const kiballs = []                // 🐉 SSJ R 유도 에네르기파 { x,y,vx,vy,spd,born,homeAt,life }
   const mechaShells = []            // { x, y, vx, vy, hp, born, life }
   const littleBoys = []             // ☢ two 10-merged nukes fuse into a falling Little Boy bomb { x, y, vy, damaging }
   const LITTLEBOY_DMG = 30          // + blast radius = 3× a nuke
@@ -2907,6 +3518,50 @@
     ctx.fillStyle = 'rgba(255,170,60,0.9)'; ctx.beginPath(); ctx.ellipse(-7 * s, 0, 5 * s, 2 * s, 0, 0, Math.PI * 2); ctx.fill()   // thruster flame
     ctx.fillStyle = '#dfe4ee'; ctx.beginPath(); ctx.roundRect(-4 * s, -1.7 * s, 9 * s, 3.4 * s, 1.5 * s); ctx.fill()
     ctx.fillStyle = '#c0403a'; ctx.beginPath(); ctx.moveTo(6 * s, 0); ctx.lineTo(2.5 * s, -1.8 * s); ctx.lineTo(2.5 * s, 1.8 * s); ctx.closePath(); ctx.fill()   // nose cone
+    ctx.restore()
+  }
+  // 🐉 SSJ R: 손에서 유도 에네르기파 2발 — 잠깐 직진 후 유도(nearestInterceptTarget 재사용 = 피격 relay 일관)
+  function spawnKiBall(now) {   // 커서 방향으로 1발 + 손 올림 포즈
+    const o = humanHandPos(), s = view.scale, spd = 21.6 * s
+    const ang = Math.atan2(cursor.y - o.y, cursor.x - o.x)
+    me.humanFace = Math.cos(ang) >= 0 ? 1 : -1
+    me.kiFireAt = now; me.kiFireAng = ang
+    const f = me.humanFace
+    kiballs.push({ x: o.x + f * 4 * s, y: o.y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, spd, born: now, homeAt: now + 220, life: 2600, id: ++mshellId })
+  }
+  function fireKiHoming(now) {
+    if (!me.humanActive || !me.ssj || weaponsLocked()) return
+    if (now < (me.kiCd || 0)) return
+    me.kiCd = now + KI_CD
+    spawnKiBall(now)             // 1발째
+    me.kiSecondAt = now + 130    // 아주 약간의 시간차 → 연속 2발 느낌(둘 다 커서 쪽)
+  }
+  function stepKiHoming(now) {
+    const W = canvas.clientWidth, H = canvas.clientHeight, s = view.scale
+    if (me.kiSecondAt && now >= me.kiSecondAt) { me.kiSecondAt = 0; if (me.humanActive && me.ssj) spawnKiBall(now) }   // 2발째(시간차)
+    for (let i = kiballs.length - 1; i >= 0; i--) {
+      const p = kiballs[i]
+      if (now - p.born > p.life) { kiballs.splice(i, 1); continue }
+      { const bh = blackholePull(p, now); if (bh) { spawnDustToHole(p.x, p.y, bh); kiballs.splice(i, 1); continue } }
+      if (now >= p.homeAt) {   // 직진 구간 후 유도
+        const tg = nearestInterceptTarget(p.x, p.y)
+        if (tg) { const dx = tg.x - p.x, dy = tg.y - p.y, d = Math.hypot(dx, dy) || 1; p.vx += ((dx / d) * p.spd - p.vx) * 0.16; p.vy += ((dy / d) * p.spd - p.vy) * 0.16; if (d < 15 * s) { tg.hit(); addEffect(p.x, p.y, 1); spawnSpark(p.x, p.y); kiballs.splice(i, 1); continue } }
+      }
+      p.x += p.vx; p.y += p.vy
+      if (inTaskbar(p.x, p.y)) { carveTaskbar(p.x, 0.5, true); spawnSpark(p.x, p.y); addEffect(p.x, p.y, 1); kiballs.splice(i, 1); continue }
+      if (p.x < -40 || p.x > W + 40 || p.y < -80 || p.y > H + 40) { kiballs.splice(i, 1); continue }
+      drawKiBall(p, now)
+    }
+  }
+  function drawKiBall(p, now) {
+    const s = view.scale, r = 7 * s, ang = Math.atan2(p.vy, p.vx)
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(ang)   // 꼬리
+    const tg = ctx.createLinearGradient(-r * 3.2, 0, 0, 0); tg.addColorStop(0, 'rgba(90,190,255,0)'); tg.addColorStop(1, 'rgba(160,225,255,0.8)')
+    ctx.fillStyle = tg; ctx.beginPath(); ctx.ellipse(-r * 1.6, 0, r * 2.8, r * 0.7, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+    const g = ctx.createRadialGradient(p.x, p.y, 1, p.x, p.y, r); g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#bfe9ff'); g.addColorStop(1, 'rgba(70,185,255,0)')
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
   }
   // Shield FOLLOWS the mecha and is held while E is down (release → retracts). Ant form = honeycomb
@@ -3385,25 +4040,57 @@
       }
     }
   }
-  function drawRemoteHumans(now) {   // peers' summoned humans are now visible
-    const W = canvas.clientWidth, H = canvas.clientHeight, s = view.scale * HUMAN_SCALE
+  function remoteArmPose(h) {   // 동기화된 포즈 코드(pk) → 팔 각도. null이면 걷기 스윙(공용 렌더러가 처리)
+    const f = h.face || 1
+    if (h.pk === 3) { const aa = Math.atan2(-f * Math.cos(h.pang || 0), Math.sin(h.pang || 0)); return { faA: aa, naA: aa } }
+    if (h.pk === 2) return { faA: -1.52, naA: -1.32 }
+    if (h.pk === 1) return { faA: 0.82, naA: 0.68 }
+    if (h.pk === 4) return { faA: 3.02, naA: 3.28 }
+    return null
+  }
+  function drawRemoteHumans(now) {   // 상대 인간도 로컬과 동일한 오공풍 퍼펫 + SSJ/비행/포즈로 렌더
+    const W = canvas.clientWidth, H = canvas.clientHeight
     for (const [pid, h] of remoteHumans) {
       ctx.globalAlpha = peerAlpha(pid)
-      const x = h.nx * W, y = h.ny * H, f = h.face || 1
-      const col = SKIN_BODY[(peers.get(pid) || {}).tint] || SKIN_BODY.default, outline = 'rgba(0,0,0,0.5)'
-      const Hh = 34 * s, headR = 6.5 * s, shoulderY = -Hh * 0.74, hipY = -Hh * 0.42, headCY = -Hh + headR
-      ctx.save(); ctx.translate(x, y); ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0, 1, 10 * s, 3 * s, 0, 0, Math.PI * 2); ctx.fill()
-      const limbs = (color, lw) => { ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(0, hipY); ctx.lineTo(3 * s, 0); ctx.moveTo(0, hipY); ctx.lineTo(-3 * s, 0); ctx.moveTo(0, hipY); ctx.lineTo(0, shoulderY); ctx.moveTo(0, shoulderY); ctx.lineTo(-f * 5 * s, shoulderY + 9 * s); ctx.moveTo(0, shoulderY); ctx.lineTo(f * 9 * s, shoulderY + 4 * s); ctx.stroke() }
-      limbs(outline, 6 * s); limbs(col, 3.8 * s)
-      if (h.weapon) { ctx.save(); ctx.translate(f * 11 * s, shoulderY + 4 * s); ctx.scale(f, 1); const L = (h.weapon === 'rifle' || h.weapon === 'bazooka') ? 30 * s : h.weapon === 'sword' ? 22 * s : 13 * s; drawWeapon(h.weapon, L); ctx.restore() }
-      ctx.fillStyle = col; ctx.strokeStyle = outline; ctx.lineWidth = 2 * s; ctx.beginPath(); ctx.arc(0, headCY, headR, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
-      ctx.fillStyle = '#2a2a30'; ctx.beginPath(); ctx.arc(f * headR * 0.4, headCY, 1.5 * s, 0, Math.PI * 2); ctx.fill()
-      const hpw = 22 * s, hp01 = Math.max(0, (h.hp || 0) / HUMAN_HP), by = headCY - headR - 6 * s
-      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(-hpw / 2, by, hpw, 3 * s)
-      ctx.fillStyle = hp01 > 0.3 ? '#7ecb7e' : '#d05555'; ctx.fillRect(-hpw / 2, by, hpw * hp01, 3 * s)
-      ctx.restore()
+      const s = view.scale * (HUMAN_SCALE + (SSJ_SCALE - HUMAN_SCALE) * (h.ssj || 0))
+      const pose = remoteArmPose(h)
+      const orb = h.pk === 1 ? { beam: !!h.ocb, amt: h.oamt || 0, st: h.ost || 0 } : null
+      renderHumanFigure({
+        x: h.nx * W, y: h.ny * H, s, f: h.face || 1, p: h.ssj || 0, walking: !!h.wk,
+        flying: !!h.fly, flyRot: h.frot || 0, flyMoving: !!h.fmov,
+        faA: pose ? pose.faA : null, naA: pose ? pose.naA : null, orb,
+        hp01: Math.max(0, (h.hp || 0) / HUMAN_HP), col: SKIN_BODY[(peers.get(pid) || {}).tint] || SKIN_BODY.default,
+        guarding: !!h.gd, guardAng: h.gang || 0, guardHp01: h.ghp != null ? h.ghp : 1
+      }, now)
     }
+    ctx.globalAlpha = 1
+  }
+  function drawRemoteBeams(now) {   // 🐉 상대 카메하메파(공용 drawBeam 재사용)
+    const W = canvas.clientWidth, H = canvas.clientHeight, s = view.scale, maxD = Math.hypot(W, H)
+    for (const [pid, rb] of [...remoteBeams]) {
+      if (now - rb.ts > 500) { remoteBeams.delete(pid); continue }
+      const ox = rb.nx * W, oy = rb.ny * H, dx = Math.cos(rb.ang), dy = Math.sin(rb.ang)
+      let len = maxD, isG = false
+      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) { len = Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy); isG = false }   // 🐉 대치/합류 지점에서 멈춤(3·4개도 전부)
+      else if (dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) { len = gd; isG = true } } }
+      ctx.globalAlpha = peerAlpha(pid)
+      drawBeam({ ox, oy, ang: rb.ang, st: rb.st }, len, ox + dx * len, oy + dy * len, isG, now)
+    }
+    ctx.globalAlpha = 1
+  }
+  function drawRemoteKiballs(now) {   // 🐉 상대 유도 에네르기파
+    const W = canvas.clientWidth, H = canvas.clientHeight, s = view.scale
+    for (const [pid, rk] of [...remoteKiballs]) {
+      if (now - rk.ts > 400) { remoteKiballs.delete(pid); continue }
+      ctx.globalAlpha = peerAlpha(pid)
+      for (const b of rk.list) {
+        const x = b.nx * W, y = b.ny * H, r = 7 * s
+        ctx.save(); ctx.globalCompositeOperation = 'lighter'
+        const g = ctx.createRadialGradient(x, y, 1, x, y, r); g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#bfe9ff'); g.addColorStop(1, 'rgba(70,185,255,0)')
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.restore()
+      }
+    }
+    ctx.globalAlpha = 1
   }
   function drawRemoteHbullets(now) {
     const W = canvas.clientWidth, H = canvas.clientHeight, s = view.scale
@@ -6312,6 +6999,7 @@
 
   // stream my missiles (relative to my cat) + shield state so peers can see/collide/block
   let sentMissiles = false, sentShield = false, sentAnts = false, sentBh = false, sentGat = false, sentGB = false, sentHuman = false, sentHB = false, sentNet = false, sentMecha = false, sentMShells = false
+  let sentBeam = false, sentKi = false   // 🐉 카메하메파/기 구체 송신 상태
   let mshellId = 1
   let lastPos = { nx: -1, ny: -1, taps: -1, hp: -1, away: -1, at: 0 }   // skip identical pos (idle rooms); 1s heartbeat for late joiners
   setInterval(() => {
@@ -6356,8 +7044,24 @@
 
     if (me.humanActive) {   // human is local-authoritative but now VISIBLE to peers
       sentHuman = true
-      net.send(JSON.stringify({ t: 'human', active: 1, nx: +(me.humanX / NW).toFixed(4), ny: +(me.humanY / NH).toFixed(4), hp: me.humanHp, weapon: me.humanWeapon || '', face: me.humanFace || 1 }))
+      const nowH = performance.now(), adoCh = me.charging && me.chargeKind === 'adogen'
+      let pk = 0, pang = 0, ocb = 0, oamt = 0, ost = 0   // 🐉 포즈 코드(0 걷기·1 충전·2 발사·3 R발사·4 비행) + 충전구체
+      if (me.kiFireAt && nowH - me.kiFireAt < 220) { pk = 3; pang = +(me.kiFireAng || 0).toFixed(2) }
+      else if (me.beam || (me.humanFireAt && nowH - me.humanFireAt < 240)) pk = 2
+      else if (me.beamCharging || adoCh) pk = 1
+      else if (me.humanFlying && me.flyMoving) pk = 4
+      if (me.beamCharging || adoCh) { ocb = me.beamCharging ? 1 : 0; const held = nowH - (me.beamChargeStart || nowH); oamt = +(me.beamCharging ? Math.min(1, held / BEAM_THRESH[2]) : (me.charge || 0)).toFixed(2); ost = me.beamCharging ? beamStage(held) : 0 }
+      const gdOn = humanGuarding(nowH) ? 1 : 0   // 🛡 가드 상태 동기화(방향·내구도)
+      let gang = 0; if (gdOn) { const gcy = me.humanY - 34 * humanEffScale() * 0.7; gang = +Math.atan2(cursor.y - gcy, cursor.x - me.humanX).toFixed(2) }
+      net.send(JSON.stringify({ t: 'human', active: 1, nx: +(me.humanX / NW).toFixed(4), ny: +(me.humanY / NH).toFixed(4), hp: me.humanHp, weapon: me.humanWeapon || '', face: me.humanFace || 1, ssj: +(me.ssjP || 0).toFixed(2), wk: me.humanWalking ? 1 : 0, fly: me.humanFlying ? 1 : 0, frot: +(me.flyRot || 0).toFixed(2), fmov: me.flyMoving ? 1 : 0, pk, pang, ocb, oamt, ost, gd: gdOn, gang, ghp: +((me.guardHP || 0) / GUARD_HP).toFixed(2) }))
     } else if (sentHuman) { net.send(JSON.stringify({ t: 'human', active: 0 })); sentHuman = false }
+    if (me.beam) {   // 🐉 카메하메파 빔(원점 정규화 + 각도·단계)
+      const o = me.beam
+      net.send(JSON.stringify({ t: 'beam', on: 1, nx: +(o.ox / NW).toFixed(4), ny: +(o.oy / NH).toFixed(4), ang: +o.ang.toFixed(3), st: o.st })); sentBeam = true
+    } else if (sentBeam) { net.send(JSON.stringify({ t: 'beam', on: 0 })); sentBeam = false }
+    if (kiballs.length) {
+      net.send(JSON.stringify({ t: 'kiballs', list: kiballs.slice(-8).map((p) => ({ nx: +(p.x / NW).toFixed(4), ny: +(p.y / NH).toFixed(4) })) })); sentKi = true
+    } else if (sentKi) { net.send(JSON.stringify({ t: 'kiballs', list: [] })); sentKi = false }
     if (me.mechaActive) {
       sentMecha = true
       net.send(JSON.stringify({ t: 'mecha', active: 1, nx: +(me.mechaX / NW).toFixed(4), ny: +(me.mechaY / NH).toFixed(4), hp: me.mechaHp, face: me.mechaFace || 1, shield: +(me.mechaShieldHp / MSHIELD_HP).toFixed(2), form: +(me.mechaForm || 0).toFixed(2), thr: me.mechaThrust ? 1 : 0, ch: me.mechaCharging ? 1 : 0, chg: +(me.mechaCharge || 0).toFixed(2), mang: +(Math.atan2(cursor.y - me.mechaY, cursor.x - me.mechaX)).toFixed(2), sdep: +(me.mechaShieldDeploy || 0).toFixed(2), snx: +((me.mechaShieldX != null ? me.mechaShieldX : me.mechaX) / NW).toFixed(4), sny: +((me.mechaShieldY != null ? me.mechaShieldY : me.mechaY) / NH).toFixed(4), sang: +(me.mechaShieldAng || 0).toFixed(2) }))   // mang = 소유자 조준 각도(내 커서 아님)
@@ -6923,14 +7627,21 @@
     stepHbullets(now)
     stepNet(now)          // net physics + catching (positions a netted human before it draws)
     stepHuman(now)
+    stepDevFakeBeam(now)
+    stepBeam(now)
     stepMechaMerge(now)
     stepMecha(now)
     stepMechaShells(now)
     stepEnergyShots(now)
     stepInterceptors(now)
+    stepKiHoming(now)
     stepLittleBoys(now)
     if (!battleActive) {   // 배틀 중엔 상대(피어) 오버레이 인간/메카/포탄/총알/그물 전부 렌더 금지 — 깨끗한 배틀 환경
       ctx.save(); drawRemoteHumans(now); ctx.restore()
+      ctx.save(); drawRemoteBeams(now); ctx.restore()       // 🐉 상대 카메하메파
+      if (_beamClash) { ctx.save(); drawBeamClashFx(_beamClash, now); ctx.restore() }   // 🐉 충돌/합체 연출은 모든 빔 위에
+      if (beamBursts.length) { ctx.save(); stepBeamBursts(now); ctx.restore() }         // 🐉 빔 파열 연출
+      ctx.save(); drawRemoteKiballs(now); ctx.restore()     // 🐉 상대 기 구체
       ctx.save(); drawRemoteMechas(now); ctx.restore()
       ctx.save(); drawRemoteMShells(now); ctx.restore()
       ctx.save(); drawRemoteHbullets(now); ctx.restore()

@@ -340,9 +340,10 @@ function pushToTop() {
   require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {})
 }
 // 창 레이어 적용: 바탕화면 모드=맨 뒤(topmost 해제), 아니면=스크린세이버급 최상단 + 작업표시줄 위 강제.
+// 단, 바탕화면 모드라도 모달(햄버거 메뉴·채팅·배틀팝업 등 forceInteractive)이 열려 있으면 최상단으로 올림 → 메뉴가 다른 창 뒤로 안 밀림.
 function applyLayer() {
   if (!win || win.isDestroyed()) return
-  if (desktopMode) { win.setAlwaysOnTop(false); pushToBottom() }
+  if (desktopMode && !forceInteractive) { win.setAlwaysOnTop(false); pushToBottom() }
   else { win.setAlwaysOnTop(true, 'screen-saver'); pushToTop() }
 }
 // Re-assert the overlay's chrome-free state. Windows re-draws the accent border on the
@@ -436,7 +437,8 @@ function startCursorPoll() {
       interactive = want
       win.setIgnoreMouseEvents(!want, { forward: true })
       // 바탕화면 모드: 고양이를 클릭(상호작용)하면 창이 앞으로 올라올 수 있으니, 상호작용이 끝나면 다시 맨 뒤로.
-      if (!want && desktopMode) pushToBottom()
+      // (단, 메뉴 등 모달이 열려 있으면 위로 유지 — forceInteractive)
+      if (!want && desktopMode && !forceInteractive) pushToBottom()
     }
   }, 24)
 }
@@ -480,13 +482,12 @@ app.whenReady().then(() => {
     const slotHeld = new Set()   // slot keys whose combo press we forwarded (for hold-to-charge weapons)
     // WASD forwarded to the overlay ONLY while a controllable human is active (privacy: we don't
     // leak key identity otherwise). The renderer toggles this via the 'human-control' ipc below.
-    const MOVE_KEYS = { [UiohookKey.W]: 'w', [UiohookKey.A]: 'a', [UiohookKey.S]: 's', [UiohookKey.D]: 'd', [UiohookKey.E]: 'e', [UiohookKey.Q]: 'q', [UiohookKey.R]: 'r' }
+    const MOVE_KEYS = { [UiohookKey.W]: 'w', [UiohookKey.A]: 'a', [UiohookKey.S]: 's', [UiohookKey.D]: 'd', [UiohookKey.E]: 'e', [UiohookKey.Q]: 'q', [UiohookKey.R]: 'r', [UiohookKey.Shift]: 'shift', [UiohookKey.ShiftRight]: 'shift', [UiohookKey.G]: 'g', [UiohookKey.H]: 'h' }   // Shift = 🐉 비행 부스트, G/H = dev 가짜 빔 테스트
     uIOhook.on('keydown', (e) => {
       // ignore OS auto-repeat while a key is held — act only on the initial press
       if (keysDown.has(e.keycode)) return
       keysDown.add(e.keycode)
       sendInput('key')
-      if (e.keycode === UiohookKey.F3 && win && !win.isDestroyed()) win.webContents.send('command', { t: 'toggle-bar' })   // F3: 하단바 숨김/표시(비소모)
       const modOk = slotMod === 'custom' ? (slotModKey != null && keysDown.has(slotModKey)) : slotModMatches(isCtrl(), isAlt(), isShift(), isCaps())
       if (slotKeyMap[e.keycode] && modOk) {
         slotHeld.add(e.keycode)
@@ -498,6 +499,10 @@ app.whenReady().then(() => {
       // Ctrl+` : toggle the ant mecha's human ⇄ ant form (only while a mecha is active)
       if (antMechaActive && e.keycode === UiohookKey.Backquote && isCtrl() && win && !win.isDestroyed()) {
         win.webContents.send('command', { t: 'mecha-transform' })
+      }
+      // Ctrl+` : 🐉 초사이언 변신/해제 (인간 소환체 활성 시)
+      if (humanActive && e.keycode === UiohookKey.Backquote && isCtrl() && win && !win.isDestroyed()) {
+        win.webContents.send('command', { t: 'human-transform' })
       }
     })
     uIOhook.on('keyup', (e) => {
@@ -541,8 +546,9 @@ ipcMain.on('desktop-mode', (_e, on) => { desktopMode = !!on; applyLayer() })   /
 ipcMain.on('set-focusable', (_e, on) => {
   if (!win || win.isDestroyed()) return
   win.setFocusable(!!on)
-  if (on) { try { win.show(); win.focus() } catch (e) {} }      // 메뉴 입력에 키보드 포커스 부여
-  else { try { win.blur() } catch (e) {} ; reassertOverlay() }  // 메뉴 닫힘 → non-activating 복귀 + 클릭통과 재적용
+  // 이 IPC는 이제 "텍스트 입력칸이 실제로 포커스되거나 단축키 캡처 중"일 때만 호출됨(menu-ui). 그때만 활성화 → 일반 메뉴 조작엔 깜빡임 없음.
+  if (on) { try { win.focus() } catch (e) {} }                                            // 입력/캡처: 키보드 위해 활성화
+  else { try { if (win.isFocused()) win.blur() } catch (e) {}; reassertOverlay() }        // 해제: (포커스됐을 때만) 비활성화 + non-activating·클릭통과 복귀
 })
 ipcMain.on('apply-update', () => { if (updater) { try { updater.quitAndInstall(true, true) } catch (e) {} } })
 ipcMain.on('check-update', () => {
@@ -557,7 +563,8 @@ ipcMain.on('check-update', () => {
 ipcMain.on('hotzone', (_e, z) => {
   hotzone = z && z.rect ? z.rect : null
   hotzoneExtra = z && Array.isArray(z.extra) ? z.extra : null
-  forceInteractive = !!(z && z.force)
+  const nf = !!(z && z.force)
+  if (nf !== forceInteractive) { forceInteractive = nf; if (desktopMode) applyLayer() }   // 모달(메뉴 등) 열림/닫힘 → 바탕화면 모드 z-order 갱신(열리면 위로, 닫히면 뒤로)
 })
 ipcMain.on('quit', () => app.quit())
 ipcMain.on('chat-close', () => {

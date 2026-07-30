@@ -34,7 +34,7 @@ npm install                 # node_modules는 저장소에 없음. 네이티브 
 - **개발자 기능 잠금해제**(가챠/재화 등): `setx BEATBEAR_DEV 1` 후 새 셸. (preload.js가 이 env로 `isDev` 판정 — 친구 배포본엔 없어 못 씀)
 - **릴레이 서버 주소**: 클라이언트 기본값 `ws://localhost:8787`. 하드코딩 아님 — 설정 창에서 변경(localStorage `server`). 다른 호스트면 그 주소 입력.
 - **모델2 = 서버가 곧 방** (2026-07-27~): **방 코드 개념 제거**. 접속 대상은 서버 IP로만 구분하고, 클라는 내부적으로 고정 방 `MAIN`에 입장한다(`FIXED_ROOM`). 서버 코드는 방 기반 그대로 유지(변경 최소화). 다른 그룹 = 서버를 하나 더 띄움.
-- **프로토콜 게이트(v0.1.7~)**: 접속 허용 기준은 앱 버전이 아니라 **`PROTOCOL_VERSION`**(클라 `renderer/app.js` ↔ 서버 `server/server.js` 공용 상수, 현재 `1`). 클라가 join에 `proto`를 보내고 서버가 `PROTOCOL_VERSION`과 일치할 때만 허용. **서버와 주고받는 메시지 규약(타입·필드·좌표계 등 양쪽이 동일 해석해야 하는 것)이 바뀔 때만 이 값을 +1** 하고, 그때는 클라·서버 동시에 올린 뒤 **서버 재시작 + 전원 업데이트** 필요. **클라 전용(서버 무관) 릴리스는 `PROTOCOL_VERSION` 그대로 두면 서버 재시작 없이 구·신 클라가 함께 접속**(0.1.4~0.1.6 같은 케이스). `SERVER_VERSION`(env→package.json)은 이제 표시·로깅용.
+- **프로토콜 게이트(v0.1.7~)**: 접속 허용 기준은 앱 버전이 아니라 **`PROTOCOL_VERSION`**(클라 `renderer/app.js` ↔ 서버 `server/server.js` 공용 상수, 현재 `3` — 1:최초, 2:개발자 코인 상자, 3:🐉 SSJ 시각 동기화(human에 ssj/fly/pose 필드 + beam/kiballs 타입)). 클라가 join에 `proto`를 보내고 서버가 `PROTOCOL_VERSION`과 일치할 때만 허용. **서버와 주고받는 메시지 규약(타입·필드·좌표계 등 양쪽이 동일 해석해야 하는 것)이 바뀔 때만 이 값을 +1** 하고, 그때는 클라·서버 동시에 올린 뒤 **서버 재시작 + 전원 업데이트** 필요. **클라 전용(서버 무관) 릴리스는 `PROTOCOL_VERSION` 그대로 두면 서버 재시작 없이 구·신 클라가 함께 접속**(0.1.4~0.1.6 같은 케이스). `SERVER_VERSION`(env→package.json)은 이제 표시·로깅용.
 - git 사용자 설정: `git config user.name` / `user.email` (커밋이 "unknown"으로 찍히지 않게).
 - Windows 개발자 모드 ON(빌드 시 심볼릭 링크) — DISTRIBUTE.md §0 참고.
 

@@ -151,11 +151,12 @@
     .hgm-drm{position:absolute;top:-6px;right:-6px;width:15px;height:15px;border-radius:50%;background:#d9534f;color:#fff;border:none;font-size:9px;cursor:pointer;padding:0;line-height:1}
     .hgm-cell.indeck{box-shadow:0 0 0 2px #6fae5a inset}
     .hgm-cell.sel{border-color:#e78f8f;box-shadow:0 0 0 2px #e78f8f inset}
-    .hgm-gtop{display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:9px}
-    .hgm-coin{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-weight:800;font-size:14px;opacity:1;cursor:default;transition:transform .15s}
-    .hgm-coin.on{transform:scale(1.04)}   /* 활성 재화만 살짝 강조 — 비활성도 딤 없이 그대로 표기(버튼 오인 방지) */
-    .hgm-coin.paw{background:#5a4324;color:#ffe6ac;box-shadow:inset 0 0 0 1.6px #f2c236}
-    .hgm-coin.grizzle{background:#4a221e;color:#ffd3c8;box-shadow:inset 0 0 0 1.6px #e2503f}
+    .hgm-gtop{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px}
+    .hgm-glabel{font-size:13px;font-weight:800;color:#8a5a6a;display:inline-flex;align-items:center;gap:4px}
+    .hgm-glabel.weapon{color:#5a6472}
+    .hgm-wallet{display:inline-flex;align-items:center;gap:9px;padding:4px 10px 4px 8px;border-radius:9px;background:#efe0cf;border:1.4px solid #d8bd9c;box-shadow:inset 0 1px 3px rgba(120,90,60,.22);cursor:default}   /* 정보 리드아웃(버튼 아님) */
+    .hgm-wlab{font-size:9px;font-weight:800;color:#a98d7c;letter-spacing:.5px}
+    .hgm-wchip{display:inline-flex;align-items:center;gap:4px;font-size:14px;font-weight:800;color:#5b4238}
     .hgm-gpaw{font-size:15px;filter:grayscale(.1)}
     .hgm-odds{background:#fbeee3;border:1px solid #ecd6c6;border-radius:8px;padding:7px 9px;margin-bottom:9px;font-size:11px;color:#6b4f43;text-align:center;line-height:1.7}
     .hgm-gwrap{display:flex;flex-direction:column;height:100%}
@@ -166,23 +167,25 @@
     .hgm-gstage{position:relative;flex:1;min-height:236px;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;border:2px solid #e7b9a4}
     .hgm-gstage.appear{background:radial-gradient(120% 95% at 50% 18%,#fff0f5,#f4c9d8)}
     .hgm-gstage.weapon{background:radial-gradient(120% 95% at 50% 18%,#eef1f6,#bfc8d6);border-color:#9aa6b6}
-    .hgm-mach{position:relative;width:150px;height:210px}
-    .hgm-gtopdec{position:absolute;top:-4px;left:50%;transform:translateX(-50%);font-size:22px;z-index:3;filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}
-    .hgm-gear{position:absolute;top:8px;width:26px;height:26px;border-radius:50%;background:#bd8a5e;border:2px solid #7a5636}
-    .hgm-gstage.weapon .hgm-gear{background:#7a828f;border-color:#48515f}
-    .hgm-globe{position:absolute;top:16px;left:12px;width:126px;height:126px;border-radius:50%;background:radial-gradient(circle at 38% 30%,rgba(255,255,255,.96),rgba(220,230,242,.55));border:3px solid #d9b6a4;box-shadow:inset 0 -12px 22px rgba(90,80,90,.16)}
-    .hgm-gstage.weapon .hgm-globe{border-color:#9aa6b6}
-    .hgm-cap{position:absolute;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#fff;border:2px solid var(--rc,#e6d3c4);box-shadow:0 1px 3px rgba(0,0,0,.2);margin-left:-17px;margin-top:-17px;animation:hgmbob 2.6s ease-in-out infinite}
-    .hgm-cap.weapon{background:#dfe4ec}
-    .hgm-cap canvas,.hgm-cap svg{display:block}
-    .hgm-base{position:absolute;bottom:0;left:0;width:150px;height:78px;border-radius:16px 16px 12px 12px}
-    .hgm-base.appear{background:linear-gradient(#f6a6bf,#e5789a);border:2px solid #d76a8a}
-    .hgm-base.weapon{background:linear-gradient(#8b95a5,#5c6675);border:2px solid #48515f}
-    .hgm-base.weapon::before{content:'';position:absolute;top:7px;left:8px;right:8px;height:7px;background:repeating-linear-gradient(45deg,#f2c94c 0 7px,#2b2f36 7px 14px);border-radius:3px;opacity:.85}
-    .hgm-chuteslot{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);width:72px;height:12px;border-radius:6px;background:rgba(0,0,0,.35)}
-    .hgm-knob{position:absolute;right:14px;bottom:13px;width:18px;height:18px;border-radius:50%}
-    .hgm-base.appear .hgm-knob{background:#ffd86b;border:2px solid #cf9a2f}
-    .hgm-base.weapon .hgm-knob{background:#e2503f;border:2px solid #a3271f}
+    /* 소환 대기: 가챠폰 기계 없이 캡슐만 클러스터로 둥실 + 소프트 장식 */
+    .hgm-capfield{position:absolute;inset:0}
+    .hgm-capfield.dim{opacity:.28;filter:saturate(.7)}
+    .hgm-cglow{position:absolute;left:50%;top:50%;width:270px;height:210px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,rgba(255,200,226,.55),transparent 68%);pointer-events:none}
+    .hgm-gstage.weapon .hgm-cglow{background:radial-gradient(circle,rgba(175,202,240,.5),transparent 68%)}
+    .hgm-gstage.rolling .hgm-cglow{animation:hgmcharge .5s ease-in forwards}
+    .hgm-cped{position:absolute;left:50%;bottom:20px;width:212px;height:38px;transform:translateX(-50%);border-radius:50%;background:rgba(255,255,255,.5);border:1.5px solid rgba(255,200,222,.55)}
+    .hgm-gstage.weapon .hgm-cped{border-color:rgba(160,180,210,.55)}
+    .hgm-cacc{position:absolute;font-size:18px;opacity:.82;filter:drop-shadow(0 1px 1px rgba(0,0,0,.15))}
+    .hgm-cspark{position:absolute;width:7px;height:7px;background:radial-gradient(circle,#fff,transparent 70%);animation:hgmtwinkle 2.4s ease-in-out infinite}
+    .hgm-cap{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;transform:translate(var(--dx,0px),var(--dy,0px));transition:transform .45s cubic-bezier(.4,0,.6,1),opacity .4s}
+    .hgm-gstage.rolling .hgm-cap{animation:hgmconverge .6s cubic-bezier(.55,0,.75,1) forwards}
+    .hgm-gstage.rolling .hgm-capin{animation:none}
+    .hgm-capin{position:relative;width:100%;height:100%;border-radius:50%;background:linear-gradient(180deg,var(--rc,#e6d3c4) 0 49%,#fdf6ee 49% 100%);border:1.6px solid rgba(120,90,70,.3);box-shadow:0 2px 4px rgba(0,0,0,.13),inset 0 -6px 9px rgba(90,70,70,.1);display:flex;align-items:flex-end;justify-content:center;overflow:hidden;animation:hgmbob 2.8s ease-in-out infinite}
+    .hgm-capin::before{content:'';position:absolute;left:2px;right:2px;top:49%;height:1.5px;background:rgba(90,60,50,.26)}
+    .hgm-capin::after{content:'';position:absolute;left:50%;top:24%;width:11px;height:11px;transform:translateX(-50%);border-radius:50%;background:#f4e9dc;border:1px solid rgba(90,60,50,.32)}
+    .hgm-caphi{position:absolute;left:24%;top:16%;width:26%;height:15%;border-radius:50%;background:rgba(255,255,255,.55);transform:rotate(-25deg)}
+    .hgm-capico{position:relative;z-index:1;margin-bottom:5px;display:flex;align-items:center;justify-content:center}
+    .hgm-capico canvas,.hgm-capico svg{width:22px;height:22px;display:block}
     .hgm-drop{position:absolute;left:50%;margin-left:-16px;width:32px;height:32px;border-radius:50%;z-index:4;box-shadow:0 2px 5px rgba(0,0,0,.3);animation:hgmdrop .92s cubic-bezier(.3,.1,.6,1) forwards}
     .hgm-drop.appear{background:radial-gradient(circle at 38% 32%,#fff,#f6a6bf)}
     .hgm-drop.weapon{background:radial-gradient(circle at 38% 32%,#eef,#8b95a5)}
@@ -193,6 +196,9 @@
     .hgm-gstage.rolling .hgm-mach{animation:hgmshake .38s ease-in-out infinite}
     .hgm-gstage.glow{animation:hgmglow .5s ease-in-out 2}
     @keyframes hgmbob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+    @keyframes hgmtwinkle{0%,100%{opacity:.25;transform:scale(.7)}50%{opacity:1;transform:scale(1.1)}}
+    @keyframes hgmcharge{0%{opacity:.7;transform:translate(-50%,-50%) scale(1)}60%{opacity:1;transform:translate(-50%,-50%) scale(1.25);filter:brightness(1.4)}100%{opacity:1;transform:translate(-50%,-50%) scale(.4);filter:brightness(1.9)}}
+    @keyframes hgmconverge{0%{transform:translate(var(--dx),var(--dy)) scale(1) rotate(0);opacity:1}55%{transform:translate(calc(var(--dx)*.45),calc(var(--dy)*.45)) scale(1.08) rotate(120deg);opacity:1}100%{transform:translate(0,0) scale(.12) rotate(300deg);opacity:0}}
     @keyframes hgmshake{0%,100%{transform:translateX(0) rotate(0)}25%{transform:translateX(-3px) rotate(-2.5deg)}75%{transform:translateX(3px) rotate(2.5deg)}}
     @keyframes hgmdrop{0%{top:38px;opacity:0}18%{opacity:1}50%{top:150px}60%{top:141px}70%{top:150px}100%{top:150px;opacity:1}}
     @keyframes hgmburst{0%{transform:scale(.4);opacity:.25}35%{opacity:1}100%{transform:scale(16);opacity:0}}
@@ -219,6 +225,14 @@
     @keyframes hgmbcap{0%{transform:scale(.5);opacity:0}18%{transform:scale(1);opacity:1}55%{transform:scale(1.15)}100%{transform:scale(2.4);opacity:0}}
     @keyframes hgmwhite{0%,55%{opacity:0}100%{opacity:1}}
     @keyframes hgmflashout{0%{opacity:1}100%{opacity:0}}
+    /* 퀄리티 업 — 뽑기 충격파 + 획득 회전 글로우/스파클/힌트 */
+    .hgm-bshock{position:absolute;width:46px;height:46px;border-radius:50%;border:3px solid var(--dg,#fff);opacity:0;animation:hgmshock .78s cubic-bezier(.2,.6,.3,1) .2s forwards}
+    @keyframes hgmshock{0%{transform:scale(.3);opacity:0}22%{opacity:.95}100%{transform:scale(6.4);opacity:0}}
+    .hgm-rring{position:absolute;width:216px;height:216px;border-radius:50%;background:conic-gradient(from 0deg,transparent,var(--gc,#ffd86b),transparent 62%);opacity:.5;filter:blur(1px);animation:hgmspin 3.2s linear infinite}
+    .hgm-rspark{position:absolute;left:50%;top:50%;width:7px;height:7px;border-radius:50%;background:radial-gradient(circle,#fff,var(--gc,#ffe089) 55%,transparent);transform:translate(-50%,-50%);opacity:0;animation:hgmrspark .85s ease-out both}
+    @keyframes hgmrspark{0%{transform:translate(-50%,-50%) scale(.2);opacity:0}22%{opacity:1}100%{transform:translate(calc(-50% + var(--tx,0px)),calc(-50% + var(--ty,0px))) scale(.3);opacity:0}}
+    .hgm-rhint{position:absolute;bottom:9px;left:0;right:0;text-align:center;font-size:11px;font-weight:700;color:#8a6d4b;opacity:0;animation:hgmhint .5s ease-out .55s forwards}
+    @keyframes hgmhint{to{opacity:.92}}
     .hgm-items{position:relative;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:center;max-width:94%}
     .hgm-ritem{display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(255,255,255,.94);border:2.5px solid var(--rc,#e6d3c4);border-radius:12px;box-shadow:0 0 12px var(--rc,#ccc);animation:hgmreveal .45s cubic-bezier(.2,.9,.3,1.35) both}
     .hgm-ritem.one{width:96px;height:104px;gap:3px}
@@ -229,7 +243,7 @@
     .hgm-rtag{position:absolute;bottom:8px;font-size:9px;font-weight:800;padding:1px 8px;border-radius:9px}
     @keyframes hgmspin{to{transform:rotate(360deg)}}
     @keyframes hgmflash{0%{opacity:.92}100%{opacity:0}}
-    @keyframes hgmreveal{0%{transform:scale(.25) translateY(-10px);opacity:0}60%{transform:scale(1.16)}100%{transform:scale(1);opacity:1}}
+    @keyframes hgmreveal{0%{transform:scale(.2) translateY(-14px) rotate(-6deg);opacity:0}55%{transform:scale(1.22) rotate(3deg);opacity:1}74%{transform:scale(.95) rotate(-1deg)}100%{transform:scale(1) rotate(0);opacity:1}}
     /* 확률 팝업(별도 모달) */
     .hgm-omodal{position:fixed;inset:0;z-index:2147483400;display:flex;align-items:center;justify-content:center;background:rgba(40,26,20,.4);font-family:"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}
     .hgm-ocard{width:300px;max-height:72vh;background:#fbeee3;border:2px solid #e7b9a4;border-radius:14px;display:flex;flex-direction:column;box-shadow:0 14px 30px rgba(120,80,60,.45);overflow:hidden}
@@ -309,7 +323,7 @@
         <button class="hgm-topbtn" data-act="quit">⏻ 종료</button>
         <button class="hgm-topbtn" data-act="upd">⟳ 업데이트 확인</button>
       </div>
-      <div class="hgm-note">💬 <b>Ctrl+Shift+B</b> : 채팅 열기 · Enter 전송/Esc 취소<br>👁️ <b>F3</b> : 하단바 숨기기/보이기</div>`
+      <div class="hgm-note">💬 <b>Ctrl+Shift+B</b> : 채팅 열기 · Enter 전송/Esc 취소</div>`
   }
   function wireTop(pop) {
     const q = pop.querySelector('[data-act="quit"]'); if (q) q.onclick = () => { if (B.quit) B.quit() }
@@ -416,15 +430,17 @@
         const modBtn = pop.querySelector('#hgm-mod')
         if (modBtn) modBtn.onclick = () => {
           modBtn.textContent = '…'
-          const onk = (e) => { e.preventDefault(); e.stopPropagation(); window.removeEventListener('keydown', onk, true); const name = modKeyName(e); if (name) setMod(name); else rr() }
+          if (B.setFocusable) B.setFocusable(true)   // 키 입력 캡처엔 창 포커스 필요(캡처 동안만)
+          const onk = (e) => { e.preventDefault(); e.stopPropagation(); window.removeEventListener('keydown', onk, true); if (B.setFocusable) B.setFocusable(false); const name = modKeyName(e); if (name) setMod(name); else rr() }
           window.addEventListener('keydown', onk, true)
         }
         pop.querySelectorAll('.hgm-keycap[data-slot]').forEach((btn) => {
           btn.onclick = () => {
             const slot = +btn.dataset.slot; btn.textContent = '…'
+            if (B.setFocusable) B.setFocusable(true)   // 키 입력 캡처엔 창 포커스 필요(캡처 동안만)
             const onk = (e) => {
               e.preventDefault(); e.stopPropagation()
-              window.removeEventListener('keydown', onk, true)
+              window.removeEventListener('keydown', onk, true); if (B.setFocusable) B.setFocusable(false)
               const name = keyName(e)
               if (name) { const keys = kb.keys.slice(); keys[slot] = name; if (B.setKeybinds) B.setKeybinds({ mod: kb.mod, keys }) }
               rr()
@@ -725,26 +741,24 @@
     const bal = kind === 'appear' ? coins.paw : coins.grizzle, coinIco = kind === 'appear' ? COIN_PAW : COIN_GRIZZLE
     const pool = B.gachaPool ? B.gachaPool(kind) : []
     const base = appearBase()
-    const capIco = (e) => kind === 'appear' ? `<span data-ag="${esc(e.group)}" data-av="${esc(e.value)}" data-hs="20"></span>` : catIcon(e.id, 20)
-    // 유리 글로브 안 캡슐 — 소환 화면 새로 접근할 때마다 랜덤 5개(뽑기 애니 도중엔 캐시 유지)
-    if (!gachaPick || gachaPick.kind !== kind) gachaPick = { kind, items: pool.slice().sort(() => Math.random() - 0.5).slice(0, 5) }
-    const POS = [[43, 44], [83, 38], [63, 68], [38, 80], [88, 78]]
+    const capIco = (e) => kind === 'appear' ? `<span data-ag="${esc(e.group)}" data-av="${esc(e.value)}" data-hs="22"></span>` : catIcon(e.id, 22)
+    // 대기화면 캡슐 — 소환 화면 새로 접근할 때마다 랜덤 8개(뽑기 애니 도중엔 캐시 유지)
+    if (!gachaPick || gachaPick.kind !== kind) gachaPick = { kind, items: pool.slice().sort(() => Math.random() - 0.5).slice(0, 8) }
+    const OFF = [[-96, -6], [-42, -58], [24, -62], [86, -18], [100, 46], [36, 66], [-32, 60], [-92, 52]]
     const caps = gachaPick.items.map((e, i) => {
-      const p = POS[i] || [63, 63], color = kind === 'appear' ? '#e6d3c4' : (e.color || '#e6d3c4')
-      return `<div class="hgm-cap ${kind}" style="left:${p[0]}px;top:${p[1]}px;--rc:${color};animation-delay:${(i * 0.32).toFixed(2)}s" title="${esc(kind === 'appear' ? appearLabel(e.group, e.value) : (e.name || e.id))}">${capIco(e)}</div>`
+      const p = OFF[i % OFF.length], color = kind === 'appear' ? '#ffc2d3' : (e.color || '#b9c2d0')
+      return `<div class="hgm-cap" style="--dx:${p[0]}px;--dy:${p[1]}px" title="${esc(kind === 'appear' ? appearLabel(e.group, e.value) : (e.name || e.id))}"><div class="hgm-capin" style="--rc:${color};animation-delay:${(i * 0.26).toFixed(2)}s"><div class="hgm-caphi"></div><div class="hgm-capico">${capIco(e)}</div></div></div>`
     }).join('')
     const res = (!gachaRolling && gachaResult && gachaResult.kind === kind && gachaResult.items.length) ? gachaResult.items : null
     const rarMap = {}; if (kind === 'weapon' && B.gachaOdds) B.gachaOdds().forEach((r) => rarMap[r.key] = r)
-    // 뽑는 중 = 캡슐에서 사방으로 빛 폭발 → 화면 전체 화이트아웃 / 결과 = 중앙 획득 연출(흰빛에서 이어짐)
-    let burstDg = kind === 'appear' ? '#ffd6e6' : '#ffe89a'
-    if (gachaRolling && gachaPending && kind === 'weapon') {
-      const order = ['legend', 'rare', 'uncommon', 'common']
-      const top = order.find((k) => gachaPending.items.some((r) => r.rarity === k)) || 'common'
-      burstDg = (rarMap[top] || {}).color || '#ffe89a'
+    // 캡슐 중앙 수렴(rolling 클래스 transition) → 빛 폭발(burst) → 화면 화이트아웃 → 중앙 획득 연출
+    function makeBurst() {   // 뽑기 시작 시 라이브 DOM에 주입(캡슐 재생성 없이 수렴 애니 유지)
+      let dg = kind === 'appear' ? '#ffd6e6' : '#ffe89a'
+      if (gachaPending && kind === 'weapon') { const order = ['legend', 'rare', 'uncommon', 'common']; const top = order.find((k) => gachaPending.items.some((r) => r.rarity === k)) || 'common'; dg = (rarMap[top] || {}).color || '#ffe89a' }
+      const rays = Array.from({ length: 12 }, (_, i) => `<div class="hgm-bray" style="transform:rotate(${i * 30}deg);animation-delay:${(i * 0.045).toFixed(3)}s"></div>`).join('')
+      return `<div class="hgm-burst"><div class="hgm-bglow" style="--dg:${dg}"></div><div class="hgm-bshock" style="--dg:${dg}"></div><div class="hgm-brays">${rays}</div><div class="hgm-bcap ${kind}"></div><div class="hgm-whiteout"></div></div>`
     }
-    const rayN = 12
-    const rays = Array.from({ length: rayN }, (_, i) => `<div class="hgm-bray" style="transform:rotate(${i * (360 / rayN)}deg);animation-delay:${(i * 0.045).toFixed(3)}s"></div>`).join('')
-    const burst = gachaRolling ? `<div class="hgm-burst"><div class="hgm-bglow" style="--dg:${burstDg}"></div><div class="hgm-brays">${rays}</div><div class="hgm-bcap ${kind}"></div><div class="hgm-whiteout"></div></div>` : ''
+    const burst = gachaRolling ? makeBurst() : ''
     let reveal = ''
     if (res) {
       const one = res.length === 1
@@ -766,30 +780,37 @@
         const rnColor = r.appear ? (r.dup ? '#a98d7c' : '#5f9e4a') : '#5b4238'
         return `<div class="hgm-ritem ${one ? 'one' : 'many'}" style="--rc:${rc};animation-delay:${(i * 0.045).toFixed(2)}s" title="${esc(nm)}">${ico}<div class="rn" style="color:${rnColor}">${esc(nm)}</div>${tag}</div>`
       }).join('')
-      reveal = `<div class="hgm-reveal" style="--gc:${gc};--ro:${ro}"><div class="hgm-rays"></div><div class="hgm-halo"></div><div class="hgm-items">${items}</div><div class="hgm-flash"></div></div>`
+      const rsparks = Array.from({ length: 12 }, (_, i) => { const a = i / 12 * Math.PI * 2, d = 58 + Math.random() * 34; return `<div class="hgm-rspark" style="--tx:${(Math.cos(a) * d).toFixed(0)}px;--ty:${(Math.sin(a) * d).toFixed(0)}px;animation-delay:${(0.1 + Math.random() * 0.14).toFixed(2)}s"></div>` }).join('')
+      reveal = `<div class="hgm-reveal" style="--gc:${gc};--ro:${ro}"><div class="hgm-rays"></div><div class="hgm-rring"></div><div class="hgm-halo"></div><div class="hgm-items">${items}</div>${rsparks}<div class="hgm-flash"></div><div class="hgm-rhint">화면을 눌러 계속</div></div>`
     }
-    const dec = kind === 'appear' ? '🎀' : '⚔️'
-    const machine = `<div class="hgm-mach${(res || gachaRolling) ? ' dim' : ''}"><div class="hgm-gtopdec">${dec}</div>` +
-      `<div class="hgm-gear" style="left:36px"></div><div class="hgm-gear" style="left:88px"></div>` +
-      `<div class="hgm-globe">${caps}</div>` +
-      `<div class="hgm-base ${kind}"><div class="hgm-chuteslot"></div><div class="hgm-knob"></div></div></div>`
-    const stage = `<div class="hgm-gstage ${kind}${gachaRolling ? ' rolling' : ''}">${machine}${burst}${reveal}</div>`
+    const acc = kind === 'appear' ? ['🎀', '💗'] : ['⚔️', '🛡️']
+    const sparks = [[16, 20], [84, 16], [14, 64], [86, 62], [50, 8], [30, 78]].map((s, i) => `<div class="hgm-cspark" style="left:${s[0]}%;top:${s[1]}%;animation-delay:${(i * 0.4).toFixed(1)}s"></div>`).join('')
+    const accHtml = `<div class="hgm-cacc" style="left:8%;top:32%">${acc[0]}</div><div class="hgm-cacc" style="right:8%;top:46%">${acc[1]}</div>`
+    const field = `<div class="hgm-capfield${res ? ' dim' : ''}"><div class="hgm-cglow"></div><div class="hgm-cped"></div>${sparks}${accHtml}${caps}</div>`
+    const stage = `<div class="hgm-gstage ${kind}${gachaRolling ? ' rolling' : ''}">${field}${burst}${reveal}</div>`
     const dis = gachaRolling ? 'disabled' : ''
     return {
       html: `<div class="hgm-gwrap"><div class="hgm-gtop">` +
-        `<span class="hgm-coin paw ${kind === 'appear' ? 'on' : ''}" title="Paw Coin · 외형 소환">${COIN_PAW} ${coins.paw}</span>` +
-        `<span class="hgm-coin grizzle ${kind === 'weapon' ? 'on' : ''}" title="Grizzle Coin · 무기·소환체 소환">${COIN_GRIZZLE} ${coins.grizzle}</span>` +
+        `<span class="hgm-glabel ${kind === 'weapon' ? 'weapon' : ''}">${kind === 'appear' ? '🎀 외형 소환' : '⚔️ 무기·소환체'}</span>` +
+        `<span class="hgm-wallet" title="보유 재화 (🐾 외형용 · 🔴 무기·소환체용)"><span class="hgm-wlab">보유</span><span class="hgm-wchip">${COIN_PAW} ${coins.paw}</span><span class="hgm-wchip">${COIN_GRIZZLE} ${coins.grizzle}</span></span>` +
         `</div>${stage}` +
         `<div class="hgm-gbtns"><button class="hgm-gbtn" data-roll="1" ${bal >= 1 && !dis ? '' : 'disabled'}><span class="hgm-gcost">${coinIco} 1</span> 1회</button>` +
         `<button class="hgm-gbtn" data-roll="10" ${bal >= 10 && !dis ? '' : 'disabled'}><span class="hgm-gcost">${coinIco} 10</span> 10회</button></div></div>`,
       wire(pop, rr) {
         pop.querySelectorAll('[data-ag]').forEach((h) => { const s = +(h.dataset.hs || 30); h.appendChild(appearThumb({ group: h.dataset.ag, value: h.dataset.av }, s, s, res)) })
+        const rev = pop.querySelector('.hgm-reveal')   // 획득 화면 클릭 → 대기 화면으로 복귀
+        if (rev) rev.addEventListener('click', () => { gachaResult = null; rr() })
         pop.querySelectorAll('[data-roll]').forEach((b) => b.onclick = () => {
           if (gachaRolling) return
           const items = B.rollGacha ? B.rollGacha(kind, +b.dataset.roll) : []
           if (!items.length) return
-          gachaPending = { kind, items }; gachaRolling = true; gachaResult = null; rr()   // 1) 캡슐 낙하 → 빛 번짐(등급색)
-          setTimeout(() => { gachaRolling = false; gachaResult = gachaPending; gachaPending = null; if (isOpen() && big === 1) rr() }, 1180)   // 2) 화이트아웃에서 이어지는 획득 연출
+          gachaPending = { kind, items }; gachaRolling = true; gachaResult = null
+          const stageEl = pop.querySelector('.hgm-gstage')
+          if (stageEl) {   // 1) 재렌더 없이: rolling 클래스로 기존 캡슐을 중앙 수렴(transition) + 빛 폭발 오버레이 주입
+            stageEl.classList.add('rolling'); stageEl.insertAdjacentHTML('beforeend', makeBurst())
+            pop.querySelectorAll('.hgm-gbtn').forEach((x) => { x.disabled = true })
+          } else rr()
+          setTimeout(() => { gachaRolling = false; gachaResult = gachaPending; gachaPending = null; if (isOpen() && big === 1) rr() }, 1180)   // 2) 화이트아웃 → 획득 연출
         })
       }
     }
@@ -948,9 +969,13 @@
     document.body.appendChild(root)
     render(curPop); position(curPop, anchor)
     onKey.active = true; hostSync()
-    if (B.setFocusable) B.setFocusable(true)   // 메뉴 열림: 입력칸(서버 주소·이름·단축키) 타이핑·복붙 위해 오버레이 포커스 허용(평소엔 focusable:false)
+    // 깜빡임 방지: 메뉴 열림만으론 오버레이를 focusable로 만들지 않음(일반 클릭/바깥클릭 시 창 활성화→재blend 깜빡임 없앰).
+    //   텍스트 입력칸이 "실제로 포커스"될 때만 focusable 켜서 타이핑 가능하게 한다. (단축키 캡처는 keysPane에서 별도 토글.)
+    const isField = (el) => !!(el && ((el.tagName === 'INPUT' && el.type !== 'range') || el.tagName === 'TEXTAREA' || el.isContentEditable))
+    root.addEventListener('focusin', (e) => { if (isField(e.target) && B.setFocusable) B.setFocusable(true) })
+    root.addEventListener('focusout', () => setTimeout(() => { if (root && !isField(document.activeElement) && B.setFocusable) B.setFocusable(false) }, 0))
   }
-  function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; if (B.setFocusable) B.setFocusable(false); hostSync() }   // 메뉴 닫힘: 다시 non-activating(깜빡임 방지)
+  function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; if (B.setFocusable) B.setFocusable(false); hostSync() }   // 메뉴 닫힘: focusable 확실히 해제
   function refresh() { if (root && curPop) render(curPop) }   // 로스터 등 변화 시 앱이 호출
   function reposition(a) { if (root && curPop) { if (a) lastAnchor = a; position(curPop, lastAnchor) } }   // 캐릭터 드래그 시 앱이 매 틱 호출
 
