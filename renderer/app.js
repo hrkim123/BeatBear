@@ -2615,6 +2615,7 @@
   const BEAM_DPS = [3, 6, 10]              // 단계별 초당 데미지(오버레이 개미 HP=1 기준)
   const BEAM_W = [11, 18, 27]              // 단계별 코어 반경(view.scale 곱) — 굵게
   let _beamClash = null                    // 🐉 내 빔 ↔ 상대 빔 상호작용(합체/정면 밀어내기/절단/굴절) — drawRemoteBeams와 공유
+  const BEAM_COLLINEAR_SIN = 0.09   // 사잇각 약 5° 이내여야 '같은 선상 정면'(밀어내기). 그 외 반대방향은 전부 대각선 처리
   const BEAM_HEADON_DOT = -0.92            // 방향 내적이 이보다 작으면 "완전 정면"(≈157° 이상) → 파워 밀어내기. 그 외 반대방향=대각선 충돌
   const KI_CD = 500                        // 🐉 R 유도 기 구체 쿨(ms)
   function beamStage(heldMs) { return heldMs >= BEAM_THRESH[2] ? 3 : heldMs >= BEAM_THRESH[1] ? 2 : heldMs >= 350 ? 1 : 0 }
@@ -2829,14 +2830,17 @@
         const ui = (ex2 * mdy - ey2 * mdx) / den      // 상대 광선에서의 교차 거리
         if (ti > minT && ti < maxD && ui > 0 && ui < rlen) { ct = ti; crt = ui; ccx = mox + mdx * ti; ccy = moy + mdy * ti }
       }
-      const rec = { R, t: ct, rt: crt, cx: ccx, cy: ccy, rox, roy, dot, rdx, rdy }
+      const sinA = Math.abs(mdx * rdy - mdy * rdx)   // 사잇각 sin — 0에 가까울수록 "같은 선상"
+      const rec = { R, t: ct, rt: crt, cx: ccx, cy: ccy, rox, roy, dot, rdx, rdy, sinA }
       if (dot > 0) allies.push(rec); else foes.push(rec)
     }
     const strM = b.st + allies.reduce((n, a) => n + (a.R.st || 1), 0)   // 내 편 총 세력
     const strF = foes.reduce((n, f) => n + (f.R.st || 1), 0)            // 상대 편 총 세력
     let out = null
     let nearFoeAny = null; for (const f of foes) if (!nearFoeAny || f.t < nearFoeAny.t) nearFoeAny = f
-    const headonFoes = foes.filter((f) => f.dot <= BEAM_HEADON_DOT)   // 거의 정면(마주봄)만 "밀어내기" 대상
+    // "완전한 정면 충돌" = 두 빔이 같은 선상에서 마주보는 경우(사잇각이 거의 0). 내적만 보면 23° 같은 대각선도
+    // 정면으로 분류돼, 충돌점을 교차점이 아닌 밀림 위치에 놓아 어긋나 보였다. 사잇각 기준으로 판정한다.
+    const headonFoes = foes.filter((f) => f.dot <= BEAM_HEADON_DOT && f.sinA < BEAM_COLLINEAR_SIN)
     if (foes.length && !headonFoes.length) {
       // ⚔ 대각선에서 오는 반대 방향 빔: 밀어내기 없음. 약한 쪽이 그 자리서 끊기고, 강한 쪽은 살짝 굴절해 계속 간다.
       const f = nearFoeAny, fs = f.R.st || 1
