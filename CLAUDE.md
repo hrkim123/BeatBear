@@ -21,7 +21,7 @@ GitHub 저장소 **`hrkim123/BeatBear`** 하나만 있으면 어디서든 이어
 
 - **[SPEC.md](SPEC.md)** — 확정 동작 + **회귀 금지 규칙**. 수정 전 반드시 §2를 읽고, 여기 확정된 동작을 깨지 않게 작업한다. 사소한 변경도 §2·§3에 갱신.
 - **[docs/battle-mode.md](docs/battle-mode.md)** — 배틀 모드 전체 설계 + **N차 개발 이력**(가장 최근이 위). 배틀 관련 작업의 단일 진실원.
-- **[docs/menu-redesign.md](docs/menu-redesign.md)** — 🚧 **진행 중: 햄버거 메뉴 대개편**(레퍼런스 스타일 팝업). 요구사항 16개 + **구현 진행 상황**(어디까지 됐는지) 단일 기준. 새 세션은 이 문서부터 읽고 이어서 작업. 새 팝업=`renderer/menu/menu-ui.js`, 연결=`renderer/app.js`(HGMenu.setBridges).- **[README.md](README.md)** — 실행·꾸미기·멀티 개요.
+- **[docs/menu-redesign.md](docs/menu-redesign.md)** — 🚧 **진행 중: 햄버거 메뉴 대개편**(레퍼런스 스타일 팝업). 요구사항 16개 + **구현 진행 상황**(어디까지 됐는지) 단일 기준. 새 세션은 이 문서부터 읽고 이어서 작업. 팝업 UI=`renderer/menu/menu-ui.js`, **메뉴 전용 창**=`renderer/menu/menu-window.html`+`menu-bridge.js`+`preload-menu.js`+`main.js`, 연결=`renderer/app.js`(`MENU_BRIDGE`·`buildMenuSnap`·액션 디스패처). ⚠️ 상태는 오버레이 단독 소유 — 메뉴 창엔 `battle/gacha.js` 로드 금지(SPEC.md §2 참고).- **[README.md](README.md)** — 실행·꾸미기·멀티 개요.
 - **[DISTRIBUTE.md](DISTRIBUTE.md)** — 배포·자동 업데이트·GH_TOKEN·개발자 모드 세팅.
 
 ## 2. 환경 세팅 (새 머신 1회)

@@ -2615,6 +2615,8 @@
   const BEAM_DPS = [3, 6, 10]              // 단계별 초당 데미지(오버레이 개미 HP=1 기준)
   const BEAM_W = [11, 18, 27]              // 단계별 코어 반경(view.scale 곱) — 굵게
   let _beamClash = null                    // 🐉 내 빔 ↔ 상대 빔 상호작용(합체/정면 밀어내기/절단/굴절) — drawRemoteBeams와 공유
+  // 굴절각 = 사잇각의 수직 성분(sin) × 파워비. 스치듯 부딪히면 조금, 가파르게 부딪히면 크게 꺾인다.
+  function beamBendAngle(sinA, weakSt, strongSt) { return Math.min(0.45, (0.06 + 0.26 * Math.min(1, sinA)) * (0.5 + 0.6 * (weakSt / Math.max(1, strongSt)))) }
   const BEAM_COLLINEAR_SIN = 0.09   // 사잇각 약 5° 이내여야 '같은 선상 정면'(밀어내기). 그 외 반대방향은 전부 대각선 처리
   const BEAM_HEADON_DOT = -0.92            // 방향 내적이 이보다 작으면 "완전 정면"(≈157° 이상) → 파워 밀어내기. 그 외 반대방향=대각선 충돌
   const KI_CD = 500                        // 🐉 R 유도 기 구체 쿨(ms)
@@ -2852,7 +2854,7 @@
       const contactLen = Math.max(minT, f.t)   // 내 빔은 "내 최근접점"에서, 상대 빔은 rt(자기 최근접점)에서 자른다
       if (b.st > fs) {   // 내가 강함 → 접촉점부터 경로가 살짝 틀어져 계속 진행
         const side = Math.sign(f.rdx * -mdy + f.rdy * mdx) || 1                       // 상대 빔이 미는 쪽
-        const bend = Math.min(0.34, 0.10 + 0.10 * (fs / b.st)) * side
+        const bend = beamBendAngle(f.sinA, fs, b.st) * side
         out = { type: 'bend', lenM: contactLen, cx: f.cx, cy: f.cy, ox0: mox, oy0: moy, bendAng: b.ang + bend, pw: b.st, cut: [f.R], cutLen: new Map([[f.R, f.rt]]) }
       } else {           // 내가 약하거나 동급 → 접촉점에서 끊김(동급이면 상대도 자기 화면에서 동일하게 끊음)
         out = { type: 'cut', lenM: contactLen, cx: f.cx, cy: f.cy, ox0: mox, oy0: moy, pw: Math.max(b.st, fs), cut: [f.R], cutLen: new Map([[f.R, f.rt]]) }
@@ -4396,7 +4398,8 @@
         if (_beamClash.type === 'cut' && (rb.st || 1) > (me.beam ? me.beam.st : 0)) {   // 내가 약해서 끊긴 경우 → 상대(강한 쪽)는 굴절해 계속
           const mdx2 = me.beam ? Math.cos(me.beam.ang) : 0, mdy2 = me.beam ? Math.sin(me.beam.ang) : 0
           const side = Math.sign(mdx2 * -Math.sin(rb.ang) + mdy2 * Math.cos(rb.ang)) || 1
-          const bs = Math.min(0.34, 0.10 + 0.10 * ((me.beam ? me.beam.st : 1) / (rb.st || 1))) * side
+          const sinA2 = Math.abs(mdx2 * Math.sin(rb.ang) - mdy2 * Math.cos(rb.ang))
+          const bs = beamBendAngle(sinA2, (me.beam ? me.beam.st : 1), rb.st || 1) * side
           bend = { ang: rb.ang + bs, st: rb.st || 1 }
         }
       }

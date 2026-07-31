@@ -51,6 +51,11 @@
 - **하단 바 폭 = 책상(desk) 폭**: 둘 다 `cellPxW`에서 파생(HUD `SIDE=0`), SCALE 바뀌어도 **항상 동일 폭·정렬**. (책상이 바보다 크면 안 됨 — 실측 diff 0 확인.)
 - **레이어 분리(무기 > 캐릭터 UI)**: `#hud-bar`가 DOM이라 캔버스 위에 떠서, 개미/미사일이 캐릭터 밑(바 위치)으로 오면 가려졌음. → **무기 전용 상위 캔버스 `#fx`**(DOM상 `#hud-bar` 뒤 = 위, `pointer-events:none`) 추가. 렌더 루프에서 `ctx`를 두 레이어로 스왑: **stage(=고양이·프리셋점·상대카운터)** 먼저, **fx(=쉴드·미사일·이펙트·작업표시줄FX·개미)** 를 그 위에. → 무기가 캐릭터 UI보다 항상 위에 보임. HUD 클릭은 fx가 pointer-events:none이라 그대로 됨.
 - **햄버거 → 설정 창 토글**(열려 있으면 닫힘). 설정 창은 오버레이와 **같은 최상위 밴드(screen-saver)** 에 두고 포커스 시 `moveTop` → 투명 오버레이 뒤로 내려가 "사라져 보이던" 문제 방지(예전엔 floating이라 오버레이(screen-saver) 아래로 가끔 가려짐).
+- **햄버거 메뉴 = 별도 BrowserWindow**(2026-07-31, 플랜 C). 오버레이 DOM이 아니다.
+  - 이유: **뒤로 보내기(desktopMode) ON에서도 메뉴만 최상단**으로 보여야 하고, 메뉴를 열고 닫을 때마다 오버레이 z-order/포커스를 건드려 생기던 **깜빡임**을 없애야 함.
+  - ⚠️ **회귀 금지**: 상태는 **오버레이가 단독 소유**한다. 메뉴 창에 `battle/gacha.js`(상태 저장소)를 로드하지 말 것 — 스냅샷 읽기 전용 facade만 사용(상태 이중화 금지). 순수 데이터·아트(`animals.js`/`battle/units.js`/`battle/art.js`)만 로드.
+  - ⚠️ **회귀 금지**: **메뉴가 열려 있는 동안 `pushToTop`/`pushToBottom`(=`applyLayer`)을 호출하지 않는다.** 전체화면 투명 오버레이가 재합성되며 눈에 띄게 깜빡인다. 작업표시줄 클릭 z-order 복구(`scheduleTopReassert`)도 `topReassertAllowed()`(=`!desktopMode && !forceInteractive && !menuWinOpen()`)로 게이트되어 있다 — 조건을 넓히지 말 것.
+  - 메뉴 창 조작 → `menu-action`/`menu-invoke` → 오버레이 `MENU_BRIDGE` 실행 → `buildMenuSnap()` 재푸시. 새 브리지 함수를 추가하면 **`MENU_BRIDGE`에 구현 + 스냅샷에 필드 추가**를 같이 해야 한다(둘 중 하나만 하면 조용히 기본값이 표시됨).
 
 ### 채팅
 - `Ctrl+Shift+B`(또는 설정의 채팅 버튼) → 입력창. Enter 전송/Esc 취소. 머리 위 말풍선(최대 80자). 채팅 때만 잠깐 창을 포커스 가능하게 함.
