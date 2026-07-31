@@ -36,7 +36,7 @@
     "productName": "BeatBear",
     "files": [
       "main.js",
-      "preload.js",
+      "preload*.js",
       "renderer/**/*",
       "!server/**",
       "!**/*.md"

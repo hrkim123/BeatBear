@@ -3,6 +3,13 @@
 //  · 동작(set*/toggle*)은 오버레이로 IPC 전달(반환값 없음)
 //  · 반환값이 필요한 3가지(rollGacha·craftWeapon·craftAppear)만 Promise
 ;(() => {
+  // preload(preload-menu.js)가 안 붙으면 여기가 undefined다. 예전에 electron-builder files 화이트리스트에
+  // preload-menu.js가 빠져 패키징본에서만 메뉴가 "클릭해도 무반응"(투명 빈 창)이던 적이 있다 → 원인을 바로 보이게.
+  if (!window.beatbearMenu) {
+    console.error('[menu] preload(beatbearMenu)가 없습니다 — preload-menu.js가 패키징에서 빠졌는지 확인(package.json build.files)')
+    document.body.innerHTML = '<div style="font:13px system-ui;color:#fff;background:#a33;padding:12px;border-radius:8px">메뉴를 불러오지 못했습니다.<br>preload-menu.js 누락</div>'
+    return
+  }
   const M = window.beatbearMenu
   let S = {}                      // 최신 스냅샷
   const A = (fn) => (...args) => M.action(fn, args)          // fire-and-forget
