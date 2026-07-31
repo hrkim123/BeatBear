@@ -339,6 +339,16 @@ function pushToTop() {
   ].join('; ')
   require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {})
 }
+// 작업표시줄 클릭 후 z-order 복구 예약. pushToTop은 PowerShell을 띄우므로 디바운스+레이트 제한.
+let topReassertT = null, topReassertAt = 0
+function scheduleTopReassert() {
+  if (topReassertT) return
+  const now = Date.now(), wait = Math.max(280, 1400 - (now - topReassertAt))
+  topReassertT = setTimeout(() => {
+    topReassertT = null; topReassertAt = Date.now()
+    if (!desktopMode) pushToTop()
+  }, wait)
+}
 // 창 레이어 적용: 바탕화면 모드=맨 뒤(topmost 해제), 아니면=스크린세이버급 최상단 + 작업표시줄 위 강제.
 // 단, 바탕화면 모드라도 모달(햄버거 메뉴·채팅·배틀팝업 등 forceInteractive)이 열려 있으면 최상단으로 올림 → 메뉴가 다른 창 뒤로 안 밀림.
 function applyLayer() {
@@ -519,6 +529,14 @@ app.whenReady().then(() => {
     })
     uIOhook.on('mousedown', (e) => {
       sendInput('mouse')
+      // 작업표시줄을 클릭하면 그 앱이 올라오면서 (자체 topmost인) 작업표시줄이 우리 위로 재삽입돼,
+      // 작업표시줄 위에 그리던 땅 파임이 가려진다 → 그때만 topmost 재삽입(PowerShell 호출이라 레이트 제한).
+      if (e && !desktopMode) {
+        try {
+          const wa = activeDisplay().workArea
+          if (e.y >= wa.y + wa.height - 2) scheduleTopReassert()
+        } catch (_) {}
+      }
       // left click (uiohook button 1) → boost missiles + start holding (gatling continuous fire)
       if (e && e.button === 1 && win && !win.isDestroyed()) {
         win.webContents.send('command', { t: 'boost' })

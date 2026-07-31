@@ -350,14 +350,19 @@
 
   function devPane() {
     const mode = B.getDevCoinMode ? B.getDevCoinMode() : null
+    const beamOn = B.getDevBeam ? !!B.getDevBeam() : false
     const seg = (val, label) => `<button class="hgm-stb ${(val ? mode === val : !mode) ? 'on' : ''}" data-dev="${val}">${label}</button>`
     const html =
       `<div class="hgm-sec">코인 상자 뿌리기 <span class="hgm-dim">개발자 전용</span></div>` +
       `<div class="hgm-subtabs">${seg('', '⛔ 끄기')}${seg('paw', coinIcon('paw') + ' 파우')}${seg('grizzle', coinIcon('grizzle') + ' 그리즐')}</div>` +
-      `<div class="hgm-note">켜면 오버레이 화면을 <b>좌클릭</b>한 지점에 코인 상자가 생깁니다. 멀티에서는 <b>가장 먼저 클릭한 사람</b>이 해당 코인 1개를 획득해요. (상자는 클릭 전까지 유지)</div>`
+      `<div class="hgm-note">켜면 오버레이 화면을 <b>좌클릭</b>한 지점에 코인 상자가 생깁니다. 멀티에서는 <b>가장 먼저 클릭한 사람</b>이 해당 코인 1개를 획득해요. (상자는 클릭 전까지 유지)</div>` +
+      `<div class="hgm-sec">🐉 테스트 빔 <span class="hgm-dim">개발자 전용</span></div>` +
+      `<div class="hgm-subtabs"><button class="hgm-stb ${beamOn ? '' : 'on'}" data-devbeam="0">⛔ 끄기</button><button class="hgm-stb ${beamOn ? 'on' : ''}" data-devbeam="1">🐉 켜기</button></div>` +
+      `<div class="hgm-note">화면 <b>중앙 높이를 가로지르는 가짜 상대 카메하메파</b>가 생깁니다. 실제 상대 빔과 같게 처리되니 <b>초사이언(Ctrl+\`) → 비행(점프 후 W)으로 중앙까지 올라가</b> 같은 방향으로 쏘면 <b>합체</b>, 마주 보고 쏘면 <b>정면 대치·밀어내기</b>를 혼자서 확인할 수 있어요.</div>`
     return {
       html, wire(pop, rr) {
         pop.querySelectorAll('[data-dev]').forEach((b) => b.onclick = () => { if (B.setDevCoinMode) B.setDevCoinMode(b.dataset.dev || null); rr() })
+        pop.querySelectorAll('[data-devbeam]').forEach((b) => b.onclick = () => { if (B.setDevBeam) B.setDevBeam(b.dataset.devbeam === '1'); rr() })
       }
     }
   }

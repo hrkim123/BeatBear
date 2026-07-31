@@ -169,6 +169,7 @@
   let coinBoxHits = []          // per-frame [{ box, x, y, r }]
   let coinBoxSeq = 0
   let devCoinMode = null        // null | 'paw' | 'grizzle'
+  let devTestBeam = false       // 🛠 개발자 전용: 화면 중앙을 가로지르는 테스트 빔(가짜 상대 빔) — 합체/대치 솔로 확인용
   function saveGiftState() { try { localStorage.setItem('giftProgress', String(Math.round(giftProgress))); if (myGift && myGift.state !== 'open') localStorage.setItem('giftPending', String(myGift.type)); else localStorage.removeItem('giftPending') } catch {} }
   function awardGift(type) { if (type === 0) addPawCoin(1); else if (window.BattleGacha) window.BattleGacha.addGems(1); try { showToast(type === 0 ? `🎁 ${coinIco('paw')} 파우 코인 +1` : `🎁 ${coinIco('grizzle')} 그리즐 코인 +1`) } catch {} pushState() }
   function bhAvailable() { return isOwned('blackhole') }   // black hole is shop-only now (no achievement)
@@ -1260,6 +1261,8 @@
       restoreBar: () => resetTaskbarDig(),
       switchView: () => { try { window.beatbear.toOverlay({ t: 'next-monitor' }) } catch (e) {} },   // 🖥 화면 전환: 다음 모니터로(모니터 1개면 no-op)
       isDev: () => isDev,   // 개발자(BEATBEAR_DEV=1)에게만 개발자 카테고리 노출
+      getDevBeam: () => devTestBeam,
+      setDevBeam: (v) => { devTestBeam = !!v },   // 🐉 화면 중앙 가로 테스트 빔(가짜 상대 빔) 토글 — 합체/대치 솔로 테스트
       getDevCoinMode: () => devCoinMode,
       setDevCoinMode: (m) => { devCoinMode = (m === 'paw' || m === 'grizzle') ? m : null; sendHotzone() },   // 🪙 코인 뿌리기 모드(좌클릭 상자 생성) 토글
       setFocusable: (on) => { try { window.beatbear.setFocusable(on) } catch (e) {} },   // 메뉴 열림/닫힘에 따라 오버레이 포커스 허용/차단(입력칸 타이핑·복붙용)
@@ -2506,7 +2509,8 @@
   const BEAM_DUR = [3000, 4000, 5000]      // 단계별 지속(ms)
   const BEAM_DPS = [3, 6, 10]              // 단계별 초당 데미지(오버레이 개미 HP=1 기준)
   const BEAM_W = [11, 18, 27]              // 단계별 코어 반경(view.scale 곱) — 굵게
-  let _beamClash = null                    // 🐉 내 빔 ↔ 상대 빔 대치 상태(정면 밀어내기/합체) — drawRemoteBeams와 공유
+  let _beamClash = null                    // 🐉 내 빔 ↔ 상대 빔 상호작용(합체/정면 밀어내기/절단/굴절) — drawRemoteBeams와 공유
+  const BEAM_HEADON_DOT = -0.92            // 방향 내적이 이보다 작으면 "완전 정면"(≈157° 이상) → 파워 밀어내기. 그 외 반대방향=대각선 충돌
   const KI_CD = 500                        // 🐉 R 유도 기 구체 쿨(ms)
   function beamStage(heldMs) { return heldMs >= BEAM_THRESH[2] ? 3 : heldMs >= BEAM_THRESH[1] ? 2 : heldMs >= 350 ? 1 : 0 }
   function humanHandPos() { const s = humanEffScale(), f = me.humanFace || 1; return { x: me.humanX + f * 16 * s, y: me.humanY - 34 * s * 0.58 } }
@@ -2647,6 +2651,12 @@
       zapAlongBeam(ox, oy, dx, dy, BEAM_W[(rb.st || 1) - 1] * s * 1.5, len, now, false)
     }
   }
+  // 🛠 개발자 전용 테스트 빔: 화면 중앙 높이를 왼쪽→오른쪽으로 가로지르는 "가짜 상대 빔".
+  // 실제 상대 빔과 동일 경로(remoteBeams)로 취급되므로 합체(같은 방향)·정면 대치·투사체 소멸까지 그대로 확인된다.
+  function stepDevTestBeam(now) {
+    if (!devTestBeam) { if (remoteBeams.has('DEVTEST')) remoteBeams.delete('DEVTEST'); return }
+    remoteBeams.set('DEVTEST', { nx: 0.02, ny: 0.5, ang: 0, st: 2, len: null, blk: 0, ts: now })
+  }
   function stepBeam(now) {
     if (!me.beam) { _beamClash = null; return }
     if (!me.humanActive || now >= me.beam.until) { me.beam = null; _beamClash = null; me.beamClashFrac = null; return }
@@ -2663,72 +2673,108 @@
       const r2 = beamSegment(bc.cx, bc.cy, bc.mergeAng, bc.mergeSt, bc.wMul, maxD, now, b.st)
       bc.mergeLen = r2.len; bc.mergeEx = r2.ex; bc.mergeEy = r2.ey; bc.mergeBlocked = r2.blocked
     }
+    if (clashed && bc.type === 'bend') {   // ⚔ 강한 빔: 접촉점부터 살짝 굴절해 계속 진행(판정도 그대로 적용)
+      const r2 = beamSegment(bc.cx, bc.cy, bc.bendAng, b.st, 1, maxD, now, b.st)
+      bc.bendLen = r2.len; bc.bendEx = r2.ex; bc.bendEy = r2.ey; bc.bendBlocked = r2.blocked
+      drawBeam({ ox: bc.cx, oy: bc.cy, ang: bc.bendAng, st: b.st }, r2.len, r2.ex, r2.ey, r2.blocked, now)
+    }
   }
   // 🐉 내 빔 ↔ 상대 빔들(remoteBeams) 대치. 빔이 3·4개여도 전부 합산:
   //   같은 편(비슷한 방향)=합체해 세력 합, 반대편(정면)=세력 합끼리 겨뤄 약한 쪽으로 밀림.
+  // 두 선분(A0→A1, B0→B1)의 최단거리와 그 접촉 지점. s = A 선분에서의 0~1 위치.
+  function segSegClosest(ax, ay, axe, aye, bx, by, bxe, bye) {
+    const ux = axe - ax, uy = aye - ay, vx = bxe - bx, vy = bye - by, wx = ax - bx, wy = ay - by
+    const a = ux * ux + uy * uy, bd = ux * vx + uy * vy, c = vx * vx + vy * vy, d = ux * wx + uy * wy, e = vx * wx + vy * wy
+    const den = a * c - bd * bd
+    let s = den > 1e-9 ? (bd * e - c * d) / den : 0
+    s = Math.max(0, Math.min(1, s))
+    let t = c > 1e-9 ? (bd * s + e) / c : 0
+    t = Math.max(0, Math.min(1, t))
+    s = a > 1e-9 ? (bd * t - d) / a : 0
+    s = Math.max(0, Math.min(1, s))
+    const p1x = ax + ux * s, p1y = ay + uy * s, p2x = bx + vx * t, p2y = by + vy * t
+    return { dist: Math.hypot(p1x - p2x, p1y - p2y), s, mx: (p1x + p2x) / 2, my: (p1y + p2y) / 2 }
+  }
+  // ⭐ 단일 규칙: 두 빔 "선분"의 최단거리 ≤ 두 빔 반지름의 합 → 실제로 닿음. 그때만 처리한다.
+  //    닿았고 방향이 비슷하면 접촉점에서 합체, 반대면 접촉점에서 대치(약한 쪽으로 밀림). 닿지 않으면 아무 일 없음.
+  //    (원점 평균·근접 보정·원점 앞뒤 조건 같은 임계값 땜질은 쓰지 않는다.)
   function computeBeamClash(b, now) {
-    const W = canvas.clientWidth, H = canvas.clientHeight
+    const W = canvas.clientWidth, H = canvas.clientHeight, vs = view.scale
     const mox = b.ox, moy = b.oy, mdx = Math.cos(b.ang), mdy = Math.sin(b.ang)
+    const maxD = Math.hypot(W, H), minT = 12 * vs, myW = BEAM_W[b.st - 1] * vs
+    const mex = mox + mdx * maxD, mey = moy + mdy * maxD   // 내 빔은 최대 길이로 두고, 실제 막힘은 stepBeam이 clashed 판정으로 걸러낸다
     const allies = [], foes = []
-    let nearFoe = Infinity
     for (const [pid, R] of remoteBeams) {
       if (now - R.ts > 500) continue
-      const rox = R.nx * W, roy = R.ny * H, dax = rox - mox, day = roy - moy, dist = Math.hypot(dax, day) || 1
-      if (mdx * dax + mdy * day <= 0) continue   // 내 빔 앞쪽에 있는 빔만
-      const diff = angDiff(b.ang, R.ang)
-      if (diff > 2.3) { foes.push({ R, dist }); if (dist < nearFoe) nearFoe = dist }
-      else if (diff < 1.0) allies.push({ R, rox, roy })
+      const rox = R.nx * W, roy = R.ny * H, rdx = Math.cos(R.ang), rdy = Math.sin(R.ang)
+      const rlen = (R.len != null && R.len > 0) ? R.len * W : maxD          // 상대가 relay한 "막힌 길이"까지가 실제 빔
+      const cl = segSegClosest(mox, moy, mex, mey, rox, roy, rox + rdx * rlen, roy + rdy * rlen)
+      if (cl.dist > myW + BEAM_W[(R.st || 1) - 1] * vs) continue            // 안 닿음 → 무시
+      const t = cl.s * maxD
+      if (t < minT) continue
+      const dot = mdx * rdx + mdy * rdy                                     // 방향 내적: >0 같은 쪽(합체) / ≤0 반대(충돌) — 사각지대 없음
+      const rec = { R, t, cx: cl.mx, cy: cl.my, rox, roy, dot, rdx, rdy }
+      if (dot > 0) allies.push(rec); else foes.push(rec)
     }
     const strM = b.st + allies.reduce((n, a) => n + (a.R.st || 1), 0)   // 내 편 총 세력
     const strF = foes.reduce((n, f) => n + (f.R.st || 1), 0)            // 상대 편 총 세력
     let out = null
-    if (foes.length) {   // 정면 대치 → 세력 차만큼 계속 밀림(평형 정지 없음) → 약한 쪽 코앞까지 밀리면 그 빔 파괴
-      // 밀림 속도: "빔 지속시간이 거의 끝날 무렵" 파괴되도록 역산(세력차 클수록 조금 더 빨리).
-      const imb = (strM - strF) / (strM + strF)   // -1..1 (양수=내가 우세)
-      const dtMs = Math.min(50, now - (me.beamClashT || now)); me.beamClashT = now
+    let nearFoeAny = null; for (const f of foes) if (!nearFoeAny || f.t < nearFoeAny.t) nearFoeAny = f
+    const headonFoes = foes.filter((f) => f.dot <= BEAM_HEADON_DOT)   // 거의 정면(마주봄)만 "밀어내기" 대상
+    if (foes.length && !headonFoes.length) {
+      // ⚔ 대각선에서 오는 반대 방향 빔: 밀어내기 없음. 약한 쪽이 그 자리서 끊기고, 강한 쪽은 살짝 굴절해 계속 간다.
+      const f = nearFoeAny, fs = f.R.st || 1
+      me.beamClashFrac = null
+      if (b.st > fs) {   // 내가 강함 → 접촉점부터 경로가 살짝 틀어져 계속 진행
+        const side = Math.sign(f.rdx * -mdy + f.rdy * mdx) || 1                       // 상대 빔이 미는 쪽
+        const bend = Math.min(0.34, 0.10 + 0.10 * (fs / b.st)) * side
+        out = { type: 'bend', lenM: f.t, cx: f.cx, cy: f.cy, ox0: mox, oy0: moy, bendAng: b.ang + bend, pw: b.st, cut: [f.R] }
+      } else {           // 내가 약하거나 동급 → 접촉점에서 끊김(동급이면 상대도 자기 화면에서 동일하게 끊음)
+        out = { type: 'cut', lenM: f.t, cx: f.cx, cy: f.cy, ox0: mox, oy0: moy, pw: Math.max(b.st, fs), cut: [f.R] }
+      }
+      _beamClash = out
+      return out
+    }
+    if (headonFoes.length) {   // 완전 정면 대치 → 접촉점에서 시작해 세력 차만큼 계속 밀림 → 약한 쪽 코앞이면 그 빔 파괴
+      const foes2 = headonFoes
+      let near = foes2[0]; for (const f of foes2) if (f.t < near.t) near = f
+      let bound = (near.rox - mox) * mdx + (near.roy - moy) * mdy   // 내 원점 → 상대 원점(내 방향 투영) = 밀림 구간
+      if (!(bound > minT * 2)) bound = Math.max(near.t * 2, minT * 4)
+      // 접촉 판정은 "대치가 일어나는가"의 게이트로만 쓴다. 정면 빔은 서로 깊게 겹쳐서 접촉점이 겹침 시작점으로
+      // 나오므로(한쪽으로 치우침), 대치 위치는 중앙에서 시작해 세력 차로 밀리게 한다.
       if (me.beamClashFrac == null) me.beamClashFrac = 0.5
+      // 밀림 속도: "빔 지속시간이 거의 끝날 무렵" 파괴되도록 역산(세력차 클수록 조금 더 빨리).
+      const strF2 = foes2.reduce((n, f) => n + (f.R.st || 1), 0)   // 정면 대치 상대들만 합산
+      const imb = (strM - strF2) / (strM + strF2)   // -1..1 (양수=내가 우세)
+      const dtMs = Math.min(50, now - (me.beamClashT || now)); me.beamClashT = now
       const imbA = Math.abs(imb)
       if (imbA > 0.001) {
-        let foeSt = 1; for (const f of foes) foeSt = Math.max(foeSt, f.R.st || 1)
+        let foeSt = 1; for (const f of foes2) foeSt = Math.max(foeSt, f.R.st || 1)
         const D = Math.min(BEAM_DUR[b.st - 1], BEAM_DUR[foeSt - 1])       // 짧은 쪽 지속시간 기준
         const Tres = D * (0.92 - 0.22 * imbA)                              // 지속의 ~70~92% 지점에서 결판
         const prog = Math.min(1, Math.abs(me.beamClashFrac - 0.5) / 0.36)  // 밀릴수록 가속(평균 1배 → 총 시간 유지)
         const rate = (0.36 / Tres) * (0.65 + 0.7 * prog)
         me.beamClashFrac = Math.max(0, Math.min(1, me.beamClashFrac + Math.sign(imb) * rate * dtMs))
       }
-      const frac = me.beamClashFrac, lenM = Math.max(20 * view.scale, nearFoe * frac)
+      const frac = me.beamClashFrac, lenM = Math.max(minT, bound * frac)
       const cx = mox + mdx * lenM, cy = moy + mdy * lenM
       if (frac <= 0.14) {   // 내 빔이 밀려 터짐(내 캐릭터 코앞) — 상대 화면에서도 같은 계산이라 동일 시점에 소멸
         beamBreakFx(cx, cy, b.st, b.ang); me.beam = null; me.beamClashFrac = null; _beamClash = null; return null
       }
       if (frac >= 0.86) {   // 상대 빔이 밀려 터짐(가짜 dev 빔은 여기서 직접 제거 — 실제 상대는 자기 클라가 스스로 소멸)
-        beamBreakFx(cx, cy, Math.max(1, strF), b.ang + Math.PI); me.beamClashFrac = 0.5
+        beamBreakFx(cx, cy, Math.max(1, strF2), b.ang + Math.PI); me.beamClashFrac = 0.5
         _beamClash = null; return null
       }
-      out = { type: 'headon', lenM, cx, cy, ox0: mox, oy0: moy, strM, strF, n: foes.length + allies.length + 1, cut: foes.map((f) => f.R).concat(allies.map((a) => a.R)) }
-    } else if (allies.length) {   // 같은 방향 → 두 빔이 "실제로 교차하는 지점"에서 합체(원점 평균이 아님)
+      out = { type: 'headon', lenM, cx, cy, ox0: mox, oy0: moy, strM, strF: strF2, n: foes2.length + allies.length + 1, cut: foes2.map((f) => f.R).concat(allies.map((a) => a.R)) }
+    } else if (allies.length) {   // 같은 방향 + 실제로 닿음 → 그 접촉 지점에서 합체
       me.beamClashFrac = null
-      const maxDist = Math.hypot(W, H), minT = 12 * view.scale
-      let bestT = Infinity
-      for (const a of allies) {   // 광선-광선 교차: mo + t*md = ro + u*rd
-        const rdx = Math.cos(a.R.ang), rdy = Math.sin(a.R.ang)
-        const den = mdx * rdy - mdy * rdx
-        if (Math.abs(den) < 1e-4) continue                       // 평행 → 교차 없음
-        const ex2 = a.rox - mox, ey2 = a.roy - moy
-        const t = (ex2 * rdy - ey2 * rdx) / den                  // 내 빔에서의 거리
-        const u = (ex2 * mdy - ey2 * mdx) / den                  // 상대 빔에서의 거리(둘 다 앞쪽이어야 진짜 교차)
-        if (!(t > minT && u > minT && t < maxDist)) continue
-        a.t = t
-        if (t < bestT) bestT = t
-      }
-      const chosen = allies.filter((a) => a.t != null && Math.abs(a.t - bestT) < 60 * view.scale)   // 같은 교차점에서 만나는 것들만
-      if (chosen.length) {
-        let vx = mdx, vy = mdy, stMax = b.st
-        for (const a of chosen) { vx += Math.cos(a.R.ang); vy += Math.sin(a.R.ang); stMax = Math.max(stMax, a.R.st || 1) }
-        const cx = mox + mdx * bestT, cy = moy + mdy * bestT
-        const strC = b.st + chosen.reduce((n2, a) => n2 + (a.R.st || 1), 0)
-        out = { type: 'merge', lenM: bestT, cx, cy, ox0: mox, oy0: moy, mergeAng: Math.atan2(vy, vx), mergeSt: Math.min(3, stMax), wMul: 1 + 0.45 * chosen.length + 0.12 * (strC - b.st), n: chosen.length + 1, cut: chosen.map((a) => a.R) }
-      }
+      let near = allies[0]; for (const a of allies) if (a.t < near.t) near = a
+      const chosen = allies.filter((a) => Math.abs(a.t - near.t) < 80 * vs)   // 같은 접촉 지점에 모이는 것들만
+      let vx = mdx, vy = mdy, stMax = b.st
+      for (const a of chosen) { vx += Math.cos(a.R.ang); vy += Math.sin(a.R.ang); stMax = Math.max(stMax, a.R.st || 1) }
+      const cx = near.cx, cy = near.cy
+      const strC = b.st + chosen.reduce((n2, a) => n2 + (a.R.st || 1), 0)
+      out = { type: 'merge', lenM: Math.hypot(cx - mox, cy - moy), cx, cy, ox0: mox, oy0: moy, mergeAng: Math.atan2(vy, vx), mergeSt: Math.min(3, stMax), wMul: 1 + 0.45 * chosen.length + 0.12 * (strC - b.st), n: chosen.length + 1, cut: chosen.map((a) => a.R) }
     } else me.beamClashFrac = null
     _beamClash = out
     return out
@@ -2805,6 +2851,18 @@
   function drawBeamClashFx(bc, now) {
     const s = view.scale
     ctx.save(); ctx.globalCompositeOperation = 'lighter'
+    if (bc.type === 'cut' || bc.type === 'bend') {   // ⚔ 대각선 충돌: 접촉 지점 충돌 연출(밀어내기 없음)
+      const r = (12 + (bc.pw || 1) * 6) * s * (0.9 + 0.14 * Math.sin(now / 36))
+      const g = ctx.createRadialGradient(bc.cx, bc.cy, 1, bc.cx, bc.cy, r)
+      g.addColorStop(0, '#ffffff'); g.addColorStop(0.42, '#dff4ff'); g.addColorStop(1, 'rgba(90,180,255,0)')
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bc.cx, bc.cy, r, 0, Math.PI * 2); ctx.fill()
+      ctx.strokeStyle = `rgba(220,244,255,0.85)`; ctx.lineWidth = 2 * s
+      for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2 + now / 70, rr = r * (0.85 + 0.55 * ((i * 5) % 3) / 2); ctx.beginPath(); ctx.moveTo(bc.cx + Math.cos(a) * r * 0.35, bc.cy + Math.sin(a) * r * 0.35); ctx.lineTo(bc.cx + Math.cos(a) * rr, bc.cy + Math.sin(a) * rr); ctx.stroke() }
+      const u = ((now / 380) % 1)   // 퍼져나가는 링 1겹
+      ctx.strokeStyle = `rgba(200,240,255,${(1 - u) * 0.6})`; ctx.lineWidth = (1 + (1 - u) * 2.5) * s
+      ctx.beginPath(); ctx.arc(bc.cx, bc.cy, r * (0.7 + u * 1.9), 0, Math.PI * 2); ctx.stroke()
+      ctx.restore(); return
+    }
     if (bc.type === 'merge') {   // 합체: 금빛 초대형 빔(원래 파란 빔과 확실히 구분) + 합류 소용돌이
       const W = canvas.clientWidth, H = canvas.clientHeight, maxD = Math.hypot(W, H)
       const mLen = bc.mergeLen != null ? bc.mergeLen : maxD
@@ -4194,10 +4252,26 @@
       const ox = rb.nx * W, oy = rb.ny * H, dx = Math.cos(rb.ang), dy = Math.sin(rb.ang)
       let len = maxD, isG = false
       if (rb.len != null && rb.len > 0) { len = rb.len * W; isG = !!rb.blk }   // ⭐ 소유자가 계산한 막힌 길이 그대로 — 유닛/캐릭터/실드에서 동일하게 막힘
-      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) { const cl = Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy); if (cl < len) { len = cl; isG = false } }   // 🐉 대치/합류 지점(더 가까우면)
+      let bend = null
+      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) {   // 🐉 내 빔과의 상호작용 지점에서 처리
+        const cl = Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy)
+        if (cl < len) { len = cl; isG = false }
+        if (_beamClash.type === 'cut' && (rb.st || 1) > (me.beam ? me.beam.st : 0)) {   // 내가 약해서 끊긴 경우 → 상대(강한 쪽)는 굴절해 계속
+          const mdx2 = me.beam ? Math.cos(me.beam.ang) : 0, mdy2 = me.beam ? Math.sin(me.beam.ang) : 0
+          const side = Math.sign(mdx2 * -Math.sin(rb.ang) + mdy2 * Math.cos(rb.ang)) || 1
+          const bs = Math.min(0.34, 0.10 + 0.10 * ((me.beam ? me.beam.st : 1) / (rb.st || 1))) * side
+          bend = { ang: rb.ang + bs, st: rb.st || 1 }
+        }
+      }
       else if (rb.len == null && dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) { len = gd; isG = true } } }   // 구버전 폴백
       ctx.globalAlpha = peerAlpha(pid)
       drawBeam({ ox, oy, ang: rb.ang, st: rb.st }, len, ox + dx * len, oy + dy * len, isG, now)
+      if (bend) {   // ⚔ 강한 쪽(상대)은 접촉점부터 굴절해 계속 — 내 화면에서도 동일하게 보이게
+        const bxx = ox + dx * len, byy = oy + dy * len, bdx2 = Math.cos(bend.ang), bdy2 = Math.sin(bend.ang)
+        let bl = maxD
+        if (bdy2 > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - byy) / bdy2; if (gd > 4 * s && gd < bl) bl = gd } }
+        drawBeam({ ox: bxx, oy: byy, ang: bend.ang, st: bend.st }, bl, bxx + bdx2 * bl, byy + bdy2 * bl, false, now)
+      }
     }
     ctx.globalAlpha = 1
   }
@@ -7757,6 +7831,7 @@
     stepHbullets(now)
     stepNet(now)          // net physics + catching (positions a netted human before it draws)
     stepHuman(now)
+    stepDevTestBeam(now)
     stepBeam(now)
     if (!battleActive) stepRemoteBeamZap(now)   // 🐉 상대 빔이 내 투사체를 지움(멀티 일관)
     stepMechaMerge(now)
