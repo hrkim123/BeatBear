@@ -2901,7 +2901,17 @@
         beamBreakFx(cx, cy, Math.max(1, strF2), b.ang + Math.PI); me.beamClashFrac = 0.5
         _beamClash = null; return null
       }
-      out = { type: 'headon', lenM, cx, cy, ox0: mox, oy0: moy, strM, strF: strF2, n: foes2.length + allies.length + 1, cut: foes2.map((f) => f.R).concat(allies.map((a) => a.R)), cutLen: new Map(foes2.concat(allies).map((f) => [f.R, f.rt])) }
+      // 정면 밀림: 충돌 지점은 "두 빔 사이"에 있어야 한다. 밀린 위치를 각 상대 빔의 광선에도 투영해
+      // 양쪽을 같은 지점에서 자르고, 연출은 두 끝의 중간에 그린다(밀릴수록 벌어지던 문제 해결).
+      const others = foes2.concat(allies)
+      const cutMap = new Map(); let sx2 = cx, sy2 = cy, cnt2 = 1
+      for (const f of others) {
+        const frdx = Math.cos(f.R.ang), frdy = Math.sin(f.R.ang)
+        const pj = Math.max(6 * vs, (cx - f.rox) * frdx + (cy - f.roy) * frdy)
+        cutMap.set(f.R, pj)
+        sx2 += f.rox + frdx * pj; sy2 += f.roy + frdy * pj; cnt2++
+      }
+      out = { type: 'headon', lenM, cx: sx2 / cnt2, cy: sy2 / cnt2, ox0: mox, oy0: moy, strM, strF: strF2, n: others.length + 1, cut: others.map((f) => f.R), cutLen: cutMap }
     } else if (allies.length) {   // 같은 방향 + 실제로 닿음 → 그 접촉 지점에서 합체
       me.beamClashFrac = null
       let near = allies[0]; for (const a of allies) if (a.t < near.t) near = a
