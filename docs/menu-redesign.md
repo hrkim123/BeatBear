@@ -152,13 +152,14 @@
   - **작업표시줄 z-order 복구 축소**: `scheduleTopReassert`에 `topReassertAllowed()` 게이트 추가. → **2026-07-31 실측 후 이 함수 자체를 제거**했다(아래 항목 참고).
   - **재렌더 가드**(§7 innerHTML 함정): 액션마다 스냅샷이 오므로 `HGMenu.refresh()`가 잦아짐 → **뽑기 연출 중·단축키 캡처 대기 중·입력칸 포커스 중**엔 재렌더를 건너뛴다. 창 재사용 시 `menu-close`로 DOM을 먼저 헐어 `open()` 토글 함정 방지(에코 루프는 `shutting` 플래그로 차단).
   - **검증**(실제 앱 CDP 구동): 8개 카테고리 22개 패널 전부 렌더·에러 0, 액션 라우팅(setHat·setWeaponSlot·toggleDeck·setFps·togglePeersDim·kickUser·togglePeerLock·setDevCoinMode·setDevBeam) 정상, invoke(rollGacha) Promise 왕복 + 연출 유지, **오버레이 실제 상태 변경 확인**(localStorage hat/fps), 스냅샷 왕복 반영, `menuMove`로 창이 캐릭터 추종, **desktopMode ON에서도 메뉴 창 정상 표시**, ✕/토글/재오픈 정상, force 기록 전 구간 `[]`.
-- ✅ **z-order 재삽입 실측 기반 재설계**(2026-07-31): `scheduleTopReassert`(작업표시줄 클릭 시 topmost 재삽입)를 **제거**하고, 실제로 필요한 지점인 **모니터 전환**으로 옮겼다. `pushToTop`은 PowerShell `SetWindowPos` → **Electron 네이티브 `setAlwaysOnTop(false→true 'screen-saver')`** 로 교체(프로세스 spawn 제거).
-  - **측정 방법**: 최상위 밴드를 100ms 간격 샘플링(변화 시에만 로깅), 오버레이/`Shell_TrayWnd`의 topmost 여부와 z-order 순위를 비교.
-  - **① 작업표시줄 클릭은 문제를 일으키지 않았다** — 40초간 실제 클릭(빈공간·앱 아이콘·탐색기·다이얼로그·앱 전환) 동안 오버레이는 topmost를 한 번도 잃지 않았고(계속 True), 순위도 계속 2위였다. 이 환경의 `Shell_TrayWnd`는 애초에 **topmost가 아니다**(전체 순위 33위) → "작업표시줄이 자체 topmost라 우리 위로 재삽입된다"는 기존 주석의 전제가 틀렸다.
-  - **② 실제로 가려지는 건 모니터 전환이었다** — 전환 직후 옮겨간 쪽 `Shell_TrayWnd`가 topmost로 승격하며 오버레이 위로 올라오고, **그 상태가 계속 유지**된다(A/B 대조군에서 14초 내내 BAD 고정).
-  - **③ 네이티브 경로로 충분** — 수정본에서 전환 2회(왕복) 모두 오버레이가 시종일관 작업표시줄 위 유지. PowerShell 불필요.
-  - 결론: 기존 코드는 **문제를 안 만드는 트리거에 걸려 깜빡임만 유발**하고 **진짜 트리거는 놓치고** 있었다. `pushToBottom`(HWND_BOTTOM)은 네이티브 대응이 없어 PowerShell 유지.
-  - ⚠️ 작업표시줄 **자동 숨김** 설정에선 `Shell_TrayWnd`가 상시 topmost라 양상이 다를 수 있다 — 재보고 시 이 지점부터 볼 것.
+- ✅ **z-order / 땅 파임 가려짐 — 오판 두 번 끝에 정리**(2026-07-31). ⚠️ **아래 결론만 믿을 것. 중간에 내렸던 두 판단은 둘 다 틀렸다.**
+  - ❌ **오판 1**: "작업표시줄은 topmost가 아니니 우리를 못 덮는다 → `scheduleTopReassert` 불필요" — 40초 샘플링 한 번으로 일반화했는데 **틀렸다**. `Shell_TrayWnd`의 topmost 여부는 **고정이 아니라 상황에 따라 승격**한다. 실제로 `Shell_TrayWnd[TOP]`가 오버레이 위에 있는 상태를 나중에 관측했다. 지웠던 `scheduleTopReassert`를 **되살렸다 — 다시 지우지 말 것.**
+  - ❌ **오판 2**: "`setAlwaysOnTop(false→true 'screen-saver')`가 PowerShell `SetWindowPos`와 동등" — **틀렸다.** 그건 topmost *속성*만 다시 켤 뿐, 이미 topmost인 창들 사이에서 **맨 위로 재삽입하지 않는다**. 그래서 작업표시줄이 위에 있으면 아무 효과가 없었고, 배포본에서 땅 파임 가려짐이 재발했다.
+  - ✅ **최종**: `pushToTop()` = `setAlwaysOnTop(true,'screen-saver')` + **`win.moveTop()`**. `moveTop`이 `SetWindowPos(HWND_TOP, SWP_NOACTIVATE)` 역할이라 포커스를 안 뺏으면서 재삽입하고, PowerShell spawn도 없다. A/B 검증: 오버레이를 topmost 창 밑으로 밀어 **깨진 상태를 재현**한 뒤 작업표시줄 클릭 한 번에 **400ms 내 복구**·유지.
+  - ✅ **`setFocusable`이 근본 원인 축**이었다. 이 API가 창 스타일을 재구성하면서 (a) topmost 밴드 내 위치를 잃고 (b) `skipTaskbar`(셸 등록)를 되살려 **작업표시줄에 BeatBear 아이콘이 튀어나오고** (c) 재합성 깜빡임을 낸다. 대응: 호출 직후 `keepOffTaskbar()`(=`setSkipTaskbar(true)`) + 한 박자(60ms) 뒤 값싼 재삽입. 이때 **두 번째는 `reassertOverlay()`를 부르면 안 된다** — 내부 `stripWin11Chrome`이 powershell.exe를 spawn해서 채팅 보낼 때마다 히치가 생긴다(실제로 그렇게 만들었다가 되돌림).
+  - 🔎 **아직 남은 것**: 작업표시줄 앱 활성/비활성 시 약한 깜빡임(= 재삽입 자체의 비용, 땅 파임 유지와 맞바꾸는 관계) · 채팅 보낼 때 약한 깜빡임(`setFocusable` + `stripWin11Chrome` 1회). **근본책은 채팅 입력칸을 메뉴처럼 별도 창으로 빼는 것** — 그러면 `setFocusable`을 아예 안 쓰게 되어 위 축이 통째로 사라진다. 사용자가 "이 정도면 됐다"고 해서 보류.
+  - 🧪 **다음에 이 영역을 만질 때**: 한 번의 샘플링으로 결론짓지 말 것. 깨진 상태를 재현(내 소유의 TopMost 창을 오버레이 위로 강제 삽입)한 뒤 **A/B 대조**로 확인해야 한다. `Shell_TrayWnd`는 외부 `SetWindowPos`를 무시하므로 작업표시줄 자체로는 재현이 안 된다.
+  - `pushToBottom`(HWND_BOTTOM)은 네이티브 대응이 없어 PowerShell 유지.
 - ✅ **확률(%) 팝업 고정 크기 + 스크롤**(2026-07-31, 사용자 요청): 항목이 늘면 카드가 계속 커지던 것 → **카드 크기 고정, 넘치는 만큼만 본문 스크롤**. 원인은 `.hgm-obody`가 flex 자식 기본값 `min-height:auto`라 내용보다 작아지지 못해 `overflow:auto`가 발동하지 못한 것 → `flex:1 1 auto; min-height:0`으로 해결하고 카드는 `height:calc(100% - 28px); max-height:420px`. 실측: 항목 62개(외형)·26개(무기) 모두 카드 424px 동일, 창(556) 안에 완전히 들어가고 본문 1729px가 372px 안에서 스크롤(1357px 이동 확인).
 
 ## 개발 시 주의(불변식 유지)

@@ -1136,13 +1136,34 @@
     target.bubbleText = text
     target.bubbleUntil = performance.now() + Math.min(9000, 4000 + text.length * 60)
   }
+  // 채팅창은 열 때 캐릭터 위에 한 번 배치되고 그 자리에 머문다(캐릭터를 따라다니지 않음).
+  // 대신 팝업처럼 "바깥 클릭·다른 조작"이면 닫는다 — 캐릭터를 드래그하면 캔버스 mousedown이라 이 경로로 닫힌다.
+  let chatGuardAt = 0
+  function onChatOutside(e) {
+    if (!chatOpenFlag) return
+    if (performance.now() - chatGuardAt < 150) return        // 여는 순간의 클릭이 바로 닫아버리지 않게
+    if (chatbar.contains(e.target)) return                    // 입력칸·채팅바 안쪽은 유지
+    closeChat()
+  }
+  // 다른 앱으로 전환하면 닫기. 단 "진짜 이탈"만 — 채팅을 여는 순간 setFocusable(true)+focus()가
+  // 자리를 잡는 동안 blur가 한 번 튀는데, 그걸로 즉시 닫히면 채팅이 아예 안 열린다.
+  function onChatBlur() {
+    if (!chatOpenFlag) return
+    setTimeout(() => { if (chatOpenFlag && !document.hasFocus()) closeChat() }, 250)
+  }
   function openChat() {
     chatOpenFlag = true; sendHotzone()
     if (wx != null) positionChat()
     chatbar.classList.remove('hidden'); chatInput.focus()
+    chatGuardAt = performance.now()
+    window.addEventListener('mousedown', onChatOutside, true)   // capture: 다른 핸들러가 먹기 전에 판정
+    window.addEventListener('blur', onChatBlur)
   }
   function closeChat() {
+    if (!chatOpenFlag) return                                  // 중복 호출(바깥클릭+blur 등) 차단
     chatOpenFlag = false
+    window.removeEventListener('mousedown', onChatOutside, true)
+    window.removeEventListener('blur', onChatBlur)
     chatbar.classList.add('hidden'); chatInput.value = ''
     if (inputSource.chatClosed) inputSource.chatClosed()
     sendHotzone()
@@ -1461,6 +1482,8 @@
   inputSource.onCommand((msg) => {
     if (!msg) return
     if (msg.t === 'request-state') pushState()
+    else if (msg.t === 'open-menu') openMenuWin()   // 🔔 트레이 아이콘에서 메뉴 열기(오버레이가 스냅샷 소유자라 여기서 연다)
+    else if (msg.t === 'toggle-desktop-mode') { setDesktopMode(!desktopMode); refreshMenuUI() }   // 🔔 트레이에서 뒤로 보내기 토글(상태는 여기가 소유)
     else if (msg.t === 'profile') {
       if (typeof msg.name === 'string') { me.name = msg.name.trim() || '나'; localStorage.setItem('name', me.name) }
       if (msg.skin) { me.skin = msg.skin; me.tint = msg.skin; localStorage.setItem('skin', me.skin) }

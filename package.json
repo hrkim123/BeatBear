@@ -38,6 +38,7 @@
       "main.js",
       "preload*.js",
       "renderer/**/*",
+      "build/icon.ico",
       "!server/**",
       "!**/*.md"
     ],

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, Notification, dialog, powerMonitor } = require('electron')
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, Notification, dialog, powerMonitor, Tray, Menu } = require('electron')
 const path = require('path')
 
 let updater = null   // electron-updater instance (set in initAutoUpdate), for restart-to-apply
@@ -391,18 +391,59 @@ function pushToBottom() {
 // (옛 주석은 "setAlwaysOnTop만으론 부족"이라 했지만, false→true 재설정은 실제로 재삽입된다 — 2026-07-31 실측)
 function pushToTop() {
   if (process.platform !== 'win32' || !win || win.isDestroyed()) return
-  // Electron 네이티브 재설정만으로 topmost 밴드 맨 위로 재삽입된다(2026-07-31 실측).
-  // 예전엔 PowerShell로 SetWindowPos(HWND_TOPMOST)를 호출했는데, 호출마다 powershell.exe를
-  // spawn하는 비용 + 전체화면 투명 레이어드 창 재합성으로 눈에 띄는 깜빡임이 있었다 → 네이티브로 교체.
-  try { win.setAlwaysOnTop(false); win.setAlwaysOnTop(true, 'screen-saver') } catch (e) {}
+  // ⚠️ setAlwaysOnTop만으로는 부족하다. 그건 "topmost 속성"을 켤 뿐, 이미 topmost인 창들 사이에서
+  //    맨 위로 **재삽입**하지는 않는다. 작업표시줄이 topmost로 승격해 우리 위에 있는 상태에선
+  //    아무 효과가 없다(2026-07-31, 이걸로 바꿨다가 땅 파임 가려짐이 재발해서 확인됨).
+  //    moveTop()이 SetWindowPos(HWND_TOP, SWP_NOACTIVATE) 역할 — 포커스를 안 뺏으면서 맨 위로 재삽입한다.
+  //    (예전엔 같은 일을 PowerShell로 했는데, 호출마다 powershell.exe를 띄우는 비용이 컸다.)
+  try { win.setAlwaysOnTop(true, 'screen-saver'); win.moveTop() } catch (e) {}
 }
-// ⛔ 작업표시줄 클릭마다 topmost를 재삽입하던 scheduleTopReassert는 제거했다(2026-07-31, 실측 근거).
-//    · 40초간 실제로 작업표시줄을 클릭(빈공간·앱아이콘·탐색기·다이얼로그)해 z-order를 100ms 간격 샘플링한 결과,
-//      오버레이는 topmost를 한 번도 잃지 않았고 Shell_TrayWnd가 우리 위로 온 적도 없다 → 고칠 게 없었다.
-//    · 반대로 실제로 가려지는 경우는 **모니터 전환**이었다(옮겨간 쪽 작업표시줄이 topmost가 되며 위로 올라오고,
-//      그 상태가 계속 유지됨). 그래서 재삽입은 moveToNextDisplay에서 한 번만 한다.
-//    → 즉 예전 코드는 문제를 안 만드는 트리거에 걸려 있었고(= 깜빡임만 유발), 진짜 트리거는 놓치고 있었다.
-//    ※ 작업표시줄 '자동 숨김' 설정에선 Shell_TrayWnd가 상시 topmost라 양상이 다를 수 있다. 재보고되면 여기서부터 볼 것.
+// 🔔 시스템 트레이(알림 영역) 아이콘. 오버레이는 skipTaskbar라 작업표시줄에 안 뜨므로,
+// 앱이 켜져 있다는 표시 + 항상 접근 가능한 손잡이가 필요하다(메뉴가 안 열리는 상황에서도 종료/열기 가능).
+// ⚠️ build/icon.ico는 renderer/ 밖이라 package.json build.files에 명시해야 패키징본에 들어간다.
+let tray = null   // 모듈 레벨 보관 필수 — 지역 변수로 두면 GC돼서 아이콘이 사라진다
+function createTray() {
+  if (tray) return
+  const iconPath = path.join(__dirname, 'build', 'icon.ico')
+  try { tray = new Tray(iconPath) } catch (e) { console.error('[beatbear] tray 생성 실패:', e && e.message); return }
+  tray.setToolTip('BeatBear')
+  const openMenu = () => { if (win && !win.isDestroyed()) win.webContents.send('command', { t: 'open-menu' }) }
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '🍔 메뉴 열기', click: openMenu },
+    { type: 'separator' },
+    // 상태 소유자는 렌더러다(setDesktopMode → 저장 + 'desktop-mode' IPC로 main에 통지) → 여기서 직접 바꾸지 않고 요청만 한다
+    { label: '🖼️ 뒤로 보내기 토글', click: () => { if (win && !win.isDestroyed()) win.webContents.send('command', { t: 'toggle-desktop-mode' }) } },
+    { label: '⬆ 맨 앞으로 되돌리기', click: () => { if (!desktopMode) pushToTop() } },   // z-order가 꼬였을 때 수동 복구
+    { type: 'separator' },
+    { label: '⏻ 종료', click: () => app.quit() },
+  ]))
+  tray.on('double-click', openMenu)
+}
+// 오버레이는 작업표시줄에 아이콘이 뜨면 안 된다(skipTaskbar:true로 생성).
+// 그런데 setFocusable()이 창 스타일을 다시 만들면서 그 상태(WS_EX_TOOLWINDOW)를 날려버려,
+// 채팅을 열면 작업표시줄에 BeatBear 아이콘이 튀어나온다. 그러면 셸이 작업표시줄을 갱신하며
+// topmost로 승격시켜 우리 위로 올라오고 → 땅 파임이 가려진다. 그래서 setFocusable 직후마다 다시 박는다.
+function keepOffTaskbar() {
+  if (!win || win.isDestroyed()) return
+  try { win.setSkipTaskbar(true) } catch (e) {}
+}
+// 작업표시줄 클릭 후 z-order 복구 예약.
+// ⚠️ 이 함수는 한 번 "필요 없다"고 판단해 제거했다가 되살렸다(2026-07-31). 다시 지우지 말 것.
+//    · Shell_TrayWnd는 **항상 topmost가 아니다** — 상황에 따라 topmost로 승격한다. 한 번 재본 결과만으로
+//      "작업표시줄은 topmost가 아니니 우리를 못 덮는다"고 일반화했던 게 오판이었다.
+//    · 실제로 `Shell_TrayWnd[TOP]`가 오버레이 위에 올라가 땅 파임이 가려진 상태를 실측으로 확인했다.
+//      같은 topmost 밴드에선 나중에 삽입된 쪽이 위라서, 작업표시줄이 승격하면 우리가 밀린다.
+//    · 채팅을 열면 우연히 복구됐는데(setFocusable(true)+focus가 창을 위로 올림) 그건 해결책이 아니다.
+//    이제 pushToTop이 PowerShell spawn 없는 네이티브라, 예전만큼 비싸지 않다.
+let topReassertT = null, topReassertAt = 0
+function scheduleTopReassert() {
+  if (topReassertT || desktopMode) return   // 바탕화면 모드에선 일부러 맨 뒤로 두는 중이므로 올리지 않는다
+  const now = Date.now(), wait = Math.max(220, 900 - (now - topReassertAt))
+  topReassertT = setTimeout(() => {
+    topReassertT = null; topReassertAt = Date.now()
+    if (!desktopMode) pushToTop()
+  }, wait)
+}
 // 창 레이어 적용: 바탕화면 모드=맨 뒤(topmost 해제), 아니면=스크린세이버급 최상단 + 작업표시줄 위 강제.
 // 단, 바탕화면 모드라도 모달(햄버거 메뉴·채팅·배틀팝업 등 forceInteractive)이 열려 있으면 최상단으로 올림 → 메뉴가 다른 창 뒤로 안 밀림.
 function applyLayer() {
@@ -460,7 +501,9 @@ function openChatFocus() {
   interactive = true
   win.setIgnoreMouseEvents(false)
   win.setFocusable(true)   // 채팅 입력 위해 일시적으로 포커스 허용(평소엔 focusable:false)
+  keepOffTaskbar()         // ⭐ setFocusable이 창 스타일을 다시 만들며 skipTaskbar(WS_EX_TOOLWINDOW)를 날린다 → 다시 박아준다
   win.show(); win.focus()
+  keepOffTaskbar()         // show/focus 후에도 한 번 더(등록이 뒤늦게 일어남)
   win.webContents.send('chat-open')
 }
 
@@ -511,6 +554,7 @@ app.whenReady().then(() => {
   if (!gotTheLock) return // a second instance — bail before creating any window
   app.setAppUserModelId('com.hrkim.beatbear') // Windows needs this for notifications to show
   createWindow()
+  createTray()
   startCursorPoll()
   initAutoUpdate()
 
@@ -584,7 +628,14 @@ app.whenReady().then(() => {
     })
     uIOhook.on('mousedown', (e) => {
       sendInput('mouse')
-      // (작업표시줄 클릭 시 topmost 재삽입은 제거 — 위 pushToTop 주석의 실측 근거 참고)
+      // 작업표시줄 영역 클릭(앱 새로 켜기·최소화된 앱 복원 포함) → 작업표시줄이 topmost로 승격하며
+      // 우리 위로 올라가 땅 파임이 가려진다 → 잠시 뒤 재삽입(디바운스+레이트 제한).
+      if (e && !desktopMode) {
+        try {
+          const wa = activeDisplay().workArea
+          if (e.y >= wa.y + wa.height - 2) scheduleTopReassert()
+        } catch (_) {}
+      }
       // left click (uiohook button 1) → boost missiles + start holding (gatling continuous fire)
       if (e && e.button === 1 && win && !win.isDestroyed()) {
         win.webContents.send('command', { t: 'boost' })
@@ -612,9 +663,10 @@ ipcMain.on('desktop-mode', (_e, on) => { desktopMode = !!on; applyLayer() })   /
 ipcMain.on('set-focusable', (_e, on) => {
   if (!win || win.isDestroyed()) return
   win.setFocusable(!!on)
+  keepOffTaskbar()   // setFocusable이 skipTaskbar를 날린다 → 즉시 복구
   // 이 IPC는 이제 "텍스트 입력칸이 실제로 포커스되거나 단축키 캡처 중"일 때만 호출됨(menu-ui). 그때만 활성화 → 일반 메뉴 조작엔 깜빡임 없음.
   if (on) { try { win.focus() } catch (e) {} }                                            // 입력/캡처: 키보드 위해 활성화
-  else { try { if (win.isFocused()) win.blur() } catch (e) {}; reassertOverlay() }        // 해제: (포커스됐을 때만) 비활성화 + non-activating·클릭통과 복귀
+  else { try { if (win.isFocused()) win.blur() } catch (e) {}; reassertOverlay(); setTimeout(() => { keepOffTaskbar(); if (!desktopMode) pushToTop() }, 60) }   // 해제: 복귀 + 한 박자 뒤 값싼 재삽입만(스타일 재적용이 늦게 끝나며 z-order를 잃음)
 })
 ipcMain.on('apply-update', () => { if (updater) { try { updater.quitAndInstall(true, true) } catch (e) {} } })
 ipcMain.on('check-update', () => {
@@ -635,7 +687,11 @@ ipcMain.on('hotzone', (_e, z) => {
 ipcMain.on('quit', () => app.quit())
 ipcMain.on('chat-close', () => {
   chatting = false
-  if (win && !win.isDestroyed()) { win.blur(); win.setFocusable(false); reassertOverlay() }   // 채팅 종료 → 다시 non-activating으로
+  // 채팅 종료 → 다시 non-activating으로. setFocusable(false)는 창 스타일을 다시 적용하면서
+  // topmost 밴드 안 위치를 잃는다 → 즉시 + 한 박자 뒤 두 번 재삽입해야 땅 파임이 안 가려진다.
+  // 두 번째 호출은 값싼 것만(pushToTop=네이티브). reassertOverlay는 stripWin11Chrome에서 powershell.exe를
+  // spawn하므로 두 번 부르면 채팅 보낼 때마다 눈에 띄는 히치가 생긴다.
+  if (win && !win.isDestroyed()) { win.blur(); win.setFocusable(false); keepOffTaskbar(); reassertOverlay(); setTimeout(() => { keepOffTaskbar(); if (!desktopMode) pushToTop() }, 60) }
 })
 
 // relay settings-window commands → overlay
