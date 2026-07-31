@@ -2616,7 +2616,7 @@
   const BEAM_W = [11, 18, 27]              // 단계별 코어 반경(view.scale 곱) — 굵게
   let _beamClash = null                    // 🐉 내 빔 ↔ 상대 빔 상호작용(합체/정면 밀어내기/절단/굴절) — drawRemoteBeams와 공유
   // 굴절각 = 사잇각의 수직 성분(sin) × 파워비. 스치듯 부딪히면 조금, 가파르게 부딪히면 크게 꺾인다.
-  function beamBendAngle(sinA, weakSt, strongSt) { return Math.min(0.45, (0.06 + 0.26 * Math.min(1, sinA)) * (0.5 + 0.6 * (weakSt / Math.max(1, strongSt)))) }
+  function beamBendAngle(sinA, weakSt, strongSt) { return Math.min(0.9, (0.10 + 0.62 * Math.min(1, sinA)) * (0.55 + 0.65 * (weakSt / Math.max(1, strongSt)))) }
   const BEAM_COLLINEAR_SIN = 0.09   // 사잇각 약 5° 이내여야 '같은 선상 정면'(밀어내기). 그 외 반대방향은 전부 대각선 처리
   const BEAM_HEADON_DOT = -0.92            // 방향 내적이 이보다 작으면 "완전 정면"(≈157° 이상) → 파워 밀어내기. 그 외 반대방향=대각선 충돌
   const KI_CD = 500                        // 🐉 R 유도 기 구체 쿨(ms)
