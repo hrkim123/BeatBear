@@ -11,6 +11,11 @@
 </head>
 <body>
 <script>window.HGMENU_WINDOW_MODE = true</script>
+<!-- 순수 데이터·아트 모듈만 로드(상태 없음): 곰 미리보기(AnimalArt) · 희귀도 메타(BattleData) · 소환체 아이콘(BattleArt).
+     ⛔ battle/gacha.js(보유·덱 상태)는 절대 로드하지 않는다 — 상태는 오버레이가 단독 소유하고 여기선 스냅샷만 읽는다. -->
+<script src="../animals.js"></script>
+<script src="../battle/units.js"></script>
+<script src="../battle/art.js"></script>
 <script src="./menu-ui.js"></script>
 <script src="./menu-bridge.js"></script>
 </body>

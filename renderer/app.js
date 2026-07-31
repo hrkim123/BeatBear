@@ -170,6 +170,7 @@
   let coinBoxSeq = 0
   let devCoinMode = null        // null | 'paw' | 'grizzle'
   let MENU_BRIDGE = null        // 🍔 메뉴 실제 구현(오버레이 소유). 별도 창 전환 시 IPC 디스패처가 이걸 호출한다.
+  let menuWinOpen = false       // 🍔 메뉴 전용 창이 떠 있는가(오버레이 DOM 메뉴가 아니라 별도 BrowserWindow)
   let devTestBeam = false       // 🛠 개발자 전용: 화면 중앙을 가로지르는 테스트 빔(가짜 상대 빔) — 합체/대치 솔로 확인용
   function saveGiftState() { try { localStorage.setItem('giftProgress', String(Math.round(giftProgress))); if (myGift && myGift.state !== 'open') localStorage.setItem('giftPending', String(myGift.type)); else localStorage.removeItem('giftPending') } catch {} }
   function awardGift(type) { if (type === 0) addPawCoin(1); else if (window.BattleGacha) window.BattleGacha.addGems(1); try { showToast(type === 0 ? `🎁 ${coinIco('paw')} 파우 코인 +1` : `🎁 ${coinIco('grizzle')} 그리즐 코인 +1`) } catch {} pushState() }
@@ -287,7 +288,7 @@
   // 단축키 변경 시 곳곳의 표시 텍스트를 최신화 (배틀 HUD·열린 메뉴·레거시 샵 슬롯 라벨)
   function refreshKeyUI() {
     if (typeof battleActive !== 'undefined' && battleActive) buildBattleHud()
-    if (window.HGMenu && window.HGMenu.isOpen()) window.HGMenu.refresh()
+    refreshMenuUI()
     for (let i = 0; i < 3; i++) {
       const selEl = document.getElementById('shop-slot-' + i), lab = selEl && selEl.parentElement
       if (lab && lab.firstChild && lab.firstChild.nodeType === 3) lab.firstChild.textContent = slotKeyLabel(i)
@@ -536,7 +537,7 @@
       while (c < a.stages.length && m >= a.stages[c]) { const r = a.reward(c); grantCoin(r.kind, r.n); showToast(`🏆 ${a.title} ${a.stages[c].toLocaleString()} 달성! ${coinLabel(r.kind, r.n)}`); c++; changed = true }
       if (c !== (achvCleared[a.id] || 0)) achvCleared[a.id] = c
     }
-    if (changed) { try { localStorage.setItem('achvCleared', JSON.stringify(achvCleared)) } catch {} ; if (achvOpenFlag) renderAchv(); if (window.HGMenu && window.HGMenu.isOpen()) window.HGMenu.refresh() }
+    if (changed) { try { localStorage.setItem('achvCleared', JSON.stringify(achvCleared)) } catch {} ; if (achvOpenFlag) renderAchv(); refreshMenuUI() }
   }
   function computeAchievements() {
     return ACHV.map((a) => {
@@ -928,7 +929,7 @@
         for (const m of [remoteMissiles, remoteShields, remoteAnts, remoteBlackholes, remoteGatlings, remoteGBullets, remoteHumans, remoteHbullets, remoteNets, remoteMechas, remoteMShells])
           for (const id of [...m.keys()]) if (!seen.has(id)) m.delete(id)
         pushState()   // reflect the new count in the settings window
-        if (window.HGMenu && window.HGMenu.isOpen()) window.HGMenu.refresh()   // 메뉴 열려 있으면 접속자 목록 갱신
+        refreshMenuUI()   // 메뉴 열려 있으면 접속자 목록 갱신
       }
       else if (msg.t === 'pos') { const p = peers.get(msg.id); if (p) {
         // 프리셋 인덱스(ac,ar)가 오면 내 화면의 같은 프리셋 좌표로 배치(해상도 무관 정합).
@@ -991,7 +992,7 @@
       else if (msg.t === 'peace') { setPeace(!!msg.on, true) }    // dev toggled peace mode → lock/unlock weapons for me too
       else if (msg.t === 'wlock') { if (msg.target === me.netId) { hostWlock = !!msg.on; if (hostWlock) clearMySummons(); showToast(hostWlock ? '🚫 호스트가 내 무기·소환체 사용을 잠갔어요' : '✅ 무기·소환체 잠금 해제') } }   // 호스트 per-user 잠금(나만 적용)
       else if (msg.t === 'kicked') { showToast('⛔ 호스트에 의해 강퇴되었습니다'); disconnect(); setStatus('강퇴됨 — 오프라인') }   // 서버가 내 연결을 닫기 직전 통지
-      else if (msg.t === 'host') { isHost = !!msg.on; localStorage.setItem('host', isHost ? '1' : '0'); if (isHost) showToast('👑 호스트 권한을 받았어요'); pushState(); if (window.HGMenu && window.HGMenu.isOpen()) window.HGMenu.refresh() }   // 호스트 이양(전 호스트 이탈) 통지
+      else if (msg.t === 'host') { isHost = !!msg.on; localStorage.setItem('host', isHost ? '1' : '0'); if (isHost) showToast('👑 호스트 권한을 받았어요'); pushState(); refreshMenuUI() }   // 호스트 이양(전 호스트 이탈) 통지
       // ── 멀티 배틀 ── (to === me.netId 만 처리)
       else if (msg.t === 'battle-req') { if (msg.to === me.netId && !battleActive && !battleIncoming && !battleAwaitingGo) { const p = peers.get(msg.id); showBattleInvitePopup(msg.id, (p && p.name) || '상대', msg.bet || null) } else if (msg.to === me.netId && connected()) net.send(JSON.stringify({ t: 'battle-dec', to: msg.id, reason: 'busy' })) }
       else if (msg.t === 'battle-acc') {   // 상대가 내 신청 수락 → 내가 아직 가능하면 확답(battle-go) 후 시작(side0), 아니면 busy 회신(상대 유령 배틀 방지)
@@ -1334,15 +1335,114 @@
         if (out.length) pushState()
         return out
       },
+      toggleDeck: (id, set) => { const G = window.BattleGacha; if (!G) return; G.toggleDeck(id, set); if (battleActive) buildBattleHud() },   // 덱 편성(메뉴 창의 BattleGacha facade가 이리로 보낸다)
     }
     if (window.HGMenu) window.HGMenu.setBridges(MENU_BRIDGE)   // 오버레이에도 유지(coinIcon 등 공용 유틸 사용)
     window.__bgModalChanged = () => sendHotzone()   // 배틀 팝업 열림/닫힘 → hotzone 갱신
-    // TODO(메뉴 별도 창 2단계): 아래를 openMenuWin()으로 교체 예정. 스냅샷 빌더·액션 디스패처 배선 완료 후 전환.
-    menuBtn.onclick = () => { if (window.HGMenu) window.HGMenu.open({ x: wx, y: wy, w: cellPxW, h: cellPxH }); else window.BattleGachaUI.openMenu(); sendHotzone() }
+    wireMenuWindow()
+    menuBtn.onclick = openMenuWin
     // 떠있던 개별 버튼 숨김 — 전부 메뉴로 통합 (인라인 display 로 이후 재노출 방지)
     for (const b of [shopBtn, achvBtn, peaceBtn]) if (b) b.style.display = 'none'
   } else {
     menuBtn.onclick = () => inputSource.openSettings()
+  }
+
+  // ---------- 🍔 메뉴 전용 창 배선 (오버레이 = 상태 단독 소유 · 메뉴 창 = 스냅샷 읽기 전용) ----------
+  // 메뉴가 오버레이 DOM이 아니라 별도 BrowserWindow에 뜨므로, 메뉴를 열고 닫아도 오버레이의
+  // z-order·포커스를 건드리지 않는다(= 깜빡임 없음 · 뒤로 보내기 ON에서도 메뉴만 최상단).
+  // 흐름: 오버레이 buildMenuSnap() ──menu-snap──▶ 메뉴 창 렌더 / 메뉴 창 조작 ──menu-action──▶ MENU_BRIDGE 실행 → 스냅샷 재푸시
+  function plainClone(v) { try { return v === undefined ? null : JSON.parse(JSON.stringify(v)) } catch (e) { return null } }   // IPC 구조화 복제 안전(함수·undefined 제거)
+
+  // menu-bridge.js가 기대하는 스냅샷. 파라미터 있는 getter는 전부 "맵"으로 펼쳐 담는다
+  // (메뉴 창은 함수를 호출할 수 없고 조회만 하므로).
+  function buildMenuSnap() {
+    const B = MENU_BRIDGE; if (!B) return {}
+    const G = window.BattleGacha
+    // ① 꾸미기 소유·개수 — {group: {value: ...}}. 소환 풀 + 기본값(풀엔 없지만 타일로 그려짐)
+    const appearOwnedM = {}, appearCountM = {}
+    const putAppear = (g, v) => {
+      ;(appearOwnedM[g] = appearOwnedM[g] || {})[v] = !!B.appearOwned(g, v)
+      ;(appearCountM[g] = appearCountM[g] || {})[v] = B.appearCount(g, v) | 0
+    }
+    for (const it of appearPool()) putAppear(it.group, it.value)
+    for (const g in APPEAR_DEFAULTS) putAppear(g, APPEAR_DEFAULTS[g])
+    // ② 카탈로그 — 메뉴가 실제로 쓰는 필드만 투영(원본 엔트리엔 전투 스탯이 통째로 들어 있어 무겁다)
+    const catalog = (G && G.catalog)
+      ? G.catalog().map((e) => ({ id: e.id, name: e.name || e.id, cat: e.cat, rarity: e.rarity, owned: !!e.owned, count: e.count || 0 }))
+      : []
+    // ③ id 단위 판정들 — slotUsable/slotEligible/inDeck/보유
+    const slotUsableM = {}, slotEligibleM = {}, inDeckM = {}, ownedUnitsM = {}
+    for (const id of new Set(catalog.map((e) => e.id).concat(SLOT_FIXED))) {
+      slotEligibleM[id] = !!B.slotEligible(id)
+      slotUsableM[id] = !!B.slotUsable(id)
+      inDeckM[id] = !!(G && G.inDeck && G.inDeck(id))
+    }
+    for (const e of catalog) ownedUnitsM[e.id] = e.owned
+    // ④ 상대별 무기잠금
+    const peerLocked = {}
+    for (const p of peers.values()) peerLocked[p.id] = !!B.isPeerLocked(p.id)
+
+    return {
+      isDev: !!B.isDev(), connected: !!B.isConnected(), server: B.getServer(), roster: B.getRoster(), isHost: !!B.isHost(),
+      peerLocked, roomInfo: B.roomInfo(),
+      appearance: B.getAppearance(), appearOwned: appearOwnedM, appearCount: appearCountM,
+      achievements: B.getAchievements(), gachaCoins: B.gachaCoins(),
+      gachaPool: { appear: B.gachaPool('appear'), weapon: B.gachaPool('weapon') },
+      gachaOdds: B.gachaOdds(),
+      craftMats: { appear: B.craftMats('appear'), weapon: B.craftMats('weapon') },
+      weaponSlots: B.weaponSlots(), slotUsable: slotUsableM, slotEligible: slotEligibleM,
+      keybinds: B.getKeybinds(), fps: B.getFps(), peersDim: !!B.getPeersDim(), desktopMode: !!B.getDesktopMode(),
+      devCoinMode: B.getDevCoinMode(), devBeam: !!B.getDevBeam(),
+      catalog, ownedUnits: ownedUnitsM, inDeck: inDeckM,
+      deck: (G && G.getDeck) ? G.getDeck() : null,
+      deckLimits: (G && G.deckLimits) ? G.deckLimits() : null,
+    }
+  }
+  let snapPushing = false   // getAchievements()가 업적 달성 시 다시 refreshMenuUI를 부를 수 있어 재진입 차단
+  function pushMenuSnap() {
+    if (!menuWinOpen || snapPushing) return
+    snapPushing = true
+    try { inputSource.menuSnap(plainClone(buildMenuSnap())) } catch (e) { console.error('[menu] 스냅샷 푸시 실패:', e) }
+    finally { snapPushing = false }
+  }
+  // 외부 변화(로스터·업적·단축키 등)로 메뉴를 갱신해야 할 때의 단일 진입점. 창 모드/오버레이 모드 모두 커버.
+  function refreshMenuUI() {
+    if (menuWinOpen) { pushMenuSnap(); return }
+    if (window.HGMenu && window.HGMenu.isOpen()) window.HGMenu.refresh()
+  }
+  function menuAnchor() { return wx == null ? null : { x: wx, y: wy, w: cellPxW, h: cellPxH } }
+  function openMenuWin() {
+    if (menuWinOpen) { closeMenuWin(); return }   // 햄버거 재클릭 = 닫기(기존 토글 동작 유지)
+    menuWinOpen = true
+    try { inputSource.menuOpen({ snap: plainClone(buildMenuSnap()), anchor: menuAnchor() }) }
+    catch (e) { menuWinOpen = false; console.error('[menu] 창 열기 실패:', e) }
+  }
+  function closeMenuWin() {
+    if (!menuWinOpen) return
+    menuWinOpen = false
+    try { inputSource.menuCloseReq() } catch (e) {}
+  }
+  function wireMenuWindow() {
+    if (!inputSource.onMenuAction) return
+    // 메뉴 창 조작 → 여기(상태 소유자)에서 실행 → 바뀐 상태를 스냅샷으로 되돌려 준다
+    inputSource.onMenuAction((m) => {
+      if (!m) return
+      const f = MENU_BRIDGE && MENU_BRIDGE[m.fn]
+      if (typeof f !== 'function') { console.warn('[menu] 알 수 없는 액션:', m.fn); return }
+      try { f.apply(null, m.args || []) } catch (e) { console.error('[menu] 액션 실패:', m.fn, e) }
+      pushMenuSnap()
+    })
+    // 반환값이 필요한 것(가챠·조합) — 결과를 rid로 되돌려 준 뒤 스냅샷 갱신
+    inputSource.onMenuInvoke(async (m) => {
+      if (!m) return
+      let val = null
+      const f = MENU_BRIDGE && MENU_BRIDGE[m.fn]
+      if (typeof f === 'function') { try { val = await f.apply(null, m.args || []) } catch (e) { console.error('[menu] invoke 실패:', m.fn, e) } }
+      else console.warn('[menu] 알 수 없는 invoke:', m.fn)
+      try { inputSource.menuInvokeResult({ rid: m.rid, val: plainClone(val) }) } catch (e) {}
+      pushMenuSnap()
+    })
+    inputSource.onMenuClosed(() => { menuWinOpen = false })   // 바깥 클릭·Esc·창 파괴 등으로 닫힘
   }
 
   function pushState() {
@@ -1420,7 +1520,7 @@
             else if (me.mechaActive) { me.mechaCharging = true; me.mechaChargeStart = performance.now(); me.mechaCharge = 0 }   // mecha cannon / energy charge
             else if (!me.gatActive && antMax() >= 10 && ants.filter((a) => !a.dead && !a.falling && !a.sprite).length >= 10) mergeAntsToMecha()   // 기본 개미(스프라이트 아님) 10마리일 때만 합체
           } else if (msg.key === 'w' && me.humanActive && me.ssj && !me.humanGround && !me.humanFlying) { me.humanFlying = true; me.flyAfter = []; me.flyRot = 0; me.flyMoving = false }   // 🐉 점프 후 공중에서 W → 비행 진입(직립 시작)
-          else if (msg.key === 'r' && me.humanActive && me.ssj && !weaponsLocked()) fireKiHoming(performance.now())   // 🐉 SSJ R: 유도 에네르기파 2발
+          else if (msg.key === 'r' && me.humanActive && me.ssj && !weaponsLocked() && !me.beam && !me.beamCharging) fireKiHoming(performance.now())   // 🐉 SSJ R: 유도 에네르기파 2발 (카메하메파 충전·발사 중엔 사용 불가)
           else if (msg.key === 'r' && !weaponsLocked() && me.mechaActive && (me.mechaForm || 0) >= 0.5 && !me.mechaTransforming) fireInterceptors(performance.now())   // human-form R: interceptors
         }
       } else {
@@ -2651,7 +2751,7 @@
       if (now - rb.ts > 500) continue
       const ox = rb.nx * W, oy = rb.ny * H, dx = Math.cos(rb.ang), dy = Math.sin(rb.ang)
       let len = (rb.len != null && rb.len > 0) ? rb.len * W : maxD   // ⭐ 소유자가 준 막힌 길이까지만 투사체 소멸
-      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) len = Math.min(len, Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy))
+      if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) { const rt1 = _beamClash.cutLen && _beamClash.cutLen.get(rb); len = Math.min(len, Math.max(6 * s, rt1 != null ? rt1 : (_beamClash.cx - ox) * dx + (_beamClash.cy - oy) * dy)) }
       else if (rb.len == null && dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) len = gd } }
       zapAlongBeam(ox, oy, dx, dy, BEAM_W[(rb.st || 1) - 1] * s * 1.5, len, now, false)
     }
@@ -2698,7 +2798,7 @@
     s = a > 1e-9 ? (bd * t - d) / a : 0
     s = Math.max(0, Math.min(1, s))
     const p1x = ax + ux * s, p1y = ay + uy * s, p2x = bx + vx * t, p2y = by + vy * t
-    return { dist: Math.hypot(p1x - p2x, p1y - p2y), s, mx: (p1x + p2x) / 2, my: (p1y + p2y) / 2 }
+    return { dist: Math.hypot(p1x - p2x, p1y - p2y), s, t, mx: (p1x + p2x) / 2, my: (p1y + p2y) / 2 }
   }
   // ⭐ 단일 규칙: 두 빔 "선분"의 최단거리 ≤ 두 빔 반지름의 합 → 실제로 닿음. 그때만 처리한다.
   //    닿았고 방향이 비슷하면 접촉점에서 합체, 반대면 접촉점에서 대치(약한 쪽으로 밀림). 닿지 않으면 아무 일 없음.
@@ -2714,11 +2814,13 @@
       const rox = R.nx * W, roy = R.ny * H, rdx = Math.cos(R.ang), rdy = Math.sin(R.ang)
       const rlen = (R.len != null && R.len > 0) ? R.len * W : maxD          // 상대가 relay한 "막힌 길이"까지가 실제 빔
       const cl = segSegClosest(mox, moy, mex, mey, rox, roy, rox + rdx * rlen, roy + rdy * rlen)
-      if (cl.dist > myW + BEAM_W[(R.st || 1) - 1] * vs) continue            // 안 닿음 → 무시
+      if (cl.dist > (myW + BEAM_W[(R.st || 1) - 1] * vs) * 0.8) continue     // 안 닿음 → 무시(여유를 줄여 "스치지도 않았는데 충돌" 방지)
       const t = cl.s * maxD
       if (t < minT) continue
       const dot = mdx * rdx + mdy * rdy                                     // 방향 내적: >0 같은 쪽(합체) / ≤0 반대(충돌) — 사각지대 없음
-      const rec = { R, t, cx: cl.mx, cy: cl.my, rox, roy, dot, rdx, rdy }
+      // rt = 상대 빔의 "자기 최근접점"까지 거리. 각 빔을 자기 최근접점에서 잘라야 근평행에서도 끝이 안 어긋난다
+      // (내 접촉점을 상대 광선에 재투영하면 얕은 각도에서 offset/tan(θ)만큼 수백 px 밀린다).
+      const rec = { R, t, rt: cl.t * rlen, cx: cl.mx, cy: cl.my, rox, roy, dot, rdx, rdy }
       if (dot > 0) allies.push(rec); else foes.push(rec)
     }
     const strM = b.st + allies.reduce((n, a) => n + (a.R.st || 1), 0)   // 내 편 총 세력
@@ -2730,12 +2832,17 @@
       // ⚔ 대각선에서 오는 반대 방향 빔: 밀어내기 없음. 약한 쪽이 그 자리서 끊기고, 강한 쪽은 살짝 굴절해 계속 간다.
       const f = nearFoeAny, fs = f.R.st || 1
       me.beamClashFrac = null
+      // ⚠ 두 빔이 정확히 교차하지 않으면 "내 최근접점"과 "접촉 중간점"이 달라, 그 차이만큼 빔 끝이 붕 뜬다.
+      //    양쪽 모두 접촉 중간점(cx,cy)까지 닿도록 길이를 접촉점 기준으로 계산한다(상대는 이미 중간점에서 자름).
+      // 접촉점을 "내 광선 위의 점"으로 확정한다. 직선거리로 자르면 접촉점이 광선 밖이라 엉뚱한 곳에서 끊기고,
+      // 연출만 허공에 떠 보였다. 여기서 정한 점(px,py)을 내 빔 끝·충돌 연출·상대 빔 절단 기준으로 모두 공유한다.
+      const contactLen = Math.max(minT, f.t)   // 내 빔은 "내 최근접점"에서, 상대 빔은 rt(자기 최근접점)에서 자른다
       if (b.st > fs) {   // 내가 강함 → 접촉점부터 경로가 살짝 틀어져 계속 진행
         const side = Math.sign(f.rdx * -mdy + f.rdy * mdx) || 1                       // 상대 빔이 미는 쪽
         const bend = Math.min(0.34, 0.10 + 0.10 * (fs / b.st)) * side
-        out = { type: 'bend', lenM: f.t, cx: f.cx, cy: f.cy, ox0: mox, oy0: moy, bendAng: b.ang + bend, pw: b.st, cut: [f.R] }
+        out = { type: 'bend', lenM: contactLen, cx: f.cx, cy: f.cy, ox0: mox, oy0: moy, bendAng: b.ang + bend, pw: b.st, cut: [f.R], cutLen: new Map([[f.R, f.rt]]) }
       } else {           // 내가 약하거나 동급 → 접촉점에서 끊김(동급이면 상대도 자기 화면에서 동일하게 끊음)
-        out = { type: 'cut', lenM: f.t, cx: f.cx, cy: f.cy, ox0: mox, oy0: moy, pw: Math.max(b.st, fs), cut: [f.R] }
+        out = { type: 'cut', lenM: contactLen, cx: f.cx, cy: f.cy, ox0: mox, oy0: moy, pw: Math.max(b.st, fs), cut: [f.R], cutLen: new Map([[f.R, f.rt]]) }
       }
       _beamClash = out
       return out
@@ -2761,7 +2868,16 @@
         const rate = (0.36 / Tres) * (0.65 + 0.7 * prog)
         me.beamClashFrac = Math.max(0, Math.min(1, me.beamClashFrac + Math.sign(imb) * rate * dtMs))
       }
-      const frac = me.beamClashFrac, lenM = Math.max(minT, bound * frac)
+      // ⚠ 정면 대치라도 "밀림 위치"는 두 빔이 실제로 겹치는 구간 안이어야 한다.
+      //    완전히 같은 선상이면 겹침 구간이 길어 자유롭게 밀리지만, 상대 빔 시작점 쪽을 조준한 경우처럼
+      //    거의 평행하되 비스듬하면 겹치는 곳은 접촉점 근처뿐 → 중간에 놓으면 허공에 뜬다.
+      //    두 방향의 sin(사잇각)으로 겹침 폭을 구해 그 안으로 제한한다(같은 선상 = sin≈0 = 제한 없음).
+      const rdxN = Math.cos(near.R.ang), rdyN = Math.sin(near.R.ang)
+      const sinA = Math.abs(mdx * rdyN - mdy * rdxN)
+      const tol = (BEAM_W[b.st - 1] + BEAM_W[(near.R.st || 1) - 1]) * vs
+      const winT = Math.min(maxD, tol / Math.max(sinA, 0.0015))
+      const frac = me.beamClashFrac
+      const lenM = Math.max(minT, Math.min(Math.max(bound * frac, near.t - winT), near.t + winT))
       const cx = mox + mdx * lenM, cy = moy + mdy * lenM
       if (frac <= 0.14) {   // 내 빔이 밀려 터짐(내 캐릭터 코앞) — 상대 화면에서도 같은 계산이라 동일 시점에 소멸
         beamBreakFx(cx, cy, b.st, b.ang); me.beam = null; me.beamClashFrac = null; _beamClash = null; return null
@@ -2770,7 +2886,7 @@
         beamBreakFx(cx, cy, Math.max(1, strF2), b.ang + Math.PI); me.beamClashFrac = 0.5
         _beamClash = null; return null
       }
-      out = { type: 'headon', lenM, cx, cy, ox0: mox, oy0: moy, strM, strF: strF2, n: foes2.length + allies.length + 1, cut: foes2.map((f) => f.R).concat(allies.map((a) => a.R)) }
+      out = { type: 'headon', lenM, cx, cy, ox0: mox, oy0: moy, strM, strF: strF2, n: foes2.length + allies.length + 1, cut: foes2.map((f) => f.R).concat(allies.map((a) => a.R)), cutLen: new Map(foes2.concat(allies).map((f) => [f.R, f.rt])) }
     } else if (allies.length) {   // 같은 방향 + 실제로 닿음 → 그 접촉 지점에서 합체
       me.beamClashFrac = null
       let near = allies[0]; for (const a of allies) if (a.t < near.t) near = a
@@ -2779,7 +2895,8 @@
       for (const a of chosen) { vx += Math.cos(a.R.ang); vy += Math.sin(a.R.ang); stMax = Math.max(stMax, a.R.st || 1) }
       const cx = near.cx, cy = near.cy
       const strC = b.st + chosen.reduce((n2, a) => n2 + (a.R.st || 1), 0)
-      out = { type: 'merge', lenM: Math.hypot(cx - mox, cy - moy), cx, cy, ox0: mox, oy0: moy, mergeAng: Math.atan2(vy, vx), mergeSt: Math.min(3, stMax), wMul: 1 + 0.45 * chosen.length + 0.12 * (strC - b.st), n: chosen.length + 1, cut: chosen.map((a) => a.R) }
+      const mLenM = Math.max(minT, (cx - mox) * mdx + (cy - moy) * mdy)   // 접촉점을 내 광선에 투영(직선거리 X)
+      out = { type: 'merge', lenM: mLenM, cx, cy, ox0: mox, oy0: moy, mergeAng: Math.atan2(vy, vx), mergeSt: Math.min(3, stMax), wMul: 1 + 0.45 * chosen.length + 0.12 * (strC - b.st), n: chosen.length + 1, cut: chosen.map((a) => a.R), cutLen: new Map(chosen.map((a) => [a.R, a.rt])) }
     } else me.beamClashFrac = null
     _beamClash = out
     return out
@@ -2857,9 +2974,10 @@
     const s = view.scale
     ctx.save(); ctx.globalCompositeOperation = 'lighter'
     if (bc.type === 'cut' || bc.type === 'bend') {   // ⚔ 대각선 충돌: 접촉 지점 충돌 연출(밀어내기 없음)
-      const r = (12 + (bc.pw || 1) * 6) * s * (0.9 + 0.14 * Math.sin(now / 36))
+      // 두 빔 끝 사이(최대 접촉 허용치만큼)를 확실히 메우도록 코어를 크고 밝게 — 접촉부가 끊겨 보이지 않게
+      const r = (18 + (bc.pw || 1) * 9) * s * (0.92 + 0.12 * Math.sin(now / 36))
       const g = ctx.createRadialGradient(bc.cx, bc.cy, 1, bc.cx, bc.cy, r)
-      g.addColorStop(0, '#ffffff'); g.addColorStop(0.42, '#dff4ff'); g.addColorStop(1, 'rgba(90,180,255,0)')
+      g.addColorStop(0, '#ffffff'); g.addColorStop(0.3, '#ffffff'); g.addColorStop(0.55, '#dff4ff'); g.addColorStop(1, 'rgba(90,180,255,0)')
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bc.cx, bc.cy, r, 0, Math.PI * 2); ctx.fill()
       ctx.strokeStyle = `rgba(220,244,255,0.85)`; ctx.lineWidth = 2 * s
       for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2 + now / 70, rr = r * (0.85 + 0.55 * ((i * 5) % 3) / 2); ctx.beginPath(); ctx.moveTo(bc.cx + Math.cos(a) * r * 0.35, bc.cy + Math.sin(a) * r * 0.35); ctx.lineTo(bc.cx + Math.cos(a) * rr, bc.cy + Math.sin(a) * rr); ctx.stroke() }
@@ -4259,7 +4377,8 @@
       if (rb.len != null && rb.len > 0) { len = rb.len * W; isG = !!rb.blk }   // ⭐ 소유자가 계산한 막힌 길이 그대로 — 유닛/캐릭터/실드에서 동일하게 막힘
       let bend = null
       if (_beamClash && _beamClash.cut && _beamClash.cut.indexOf(rb) >= 0) {   // 🐉 내 빔과의 상호작용 지점에서 처리
-        const cl = Math.hypot(_beamClash.cx - ox, _beamClash.cy - oy)
+        const rt0 = _beamClash.cutLen && _beamClash.cutLen.get(rb)
+        const cl = Math.max(6 * s, rt0 != null ? rt0 : (_beamClash.cx - ox) * dx + (_beamClash.cy - oy) * dy)   // 상대 빔은 자기 최근접점에서 절단(근평행에서도 끝이 안 어긋남)
         if (cl < len) { len = cl; isG = false }
         if (_beamClash.type === 'cut' && (rb.st || 1) > (me.beam ? me.beam.st : 0)) {   // 내가 약해서 끊긴 경우 → 상대(강한 쪽)는 굴절해 계속
           const mdx2 = me.beam ? Math.cos(me.beam.ang) : 0, mdy2 = me.beam ? Math.sin(me.beam.ang) : 0
@@ -7494,7 +7613,11 @@
   }
 
   // 메뉴 열려 있으면 캐릭터 위로 붙여 따라다니게(드래그 추종)
-  function repositionMenu() { if (window.HGMenu && window.HGMenu.isOpen() && wx != null) window.HGMenu.reposition({ x: wx, y: wy, w: cellPxW, h: cellPxH }) }
+  function repositionMenu() {
+    if (menuWinOpen) { if (wx != null) { try { inputSource.menuMove(menuAnchor()) } catch (e) {} } return }   // 별도 창: 창 자체를 캐릭터 옆으로 옮긴다(main이 계산)
+    if (window.HGMenu && window.HGMenu.isOpen() && wx != null) window.HGMenu.reposition({ x: wx, y: wy, w: cellPxW, h: cellPxH })
+  }
+  function anyMenuOpen() { return menuWinOpen || !!(window.HGMenu && window.HGMenu.isOpen()) }
 
   // cursor for missile homing + dragging comes from main's poll (window-relative)
   if (inputSource.onCursor) inputSource.onCursor((p) => {
@@ -7510,13 +7633,14 @@
   canvas.addEventListener('mousedown', (e) => {
     const cb = hitCoinBox(e.clientX, e.clientY)   // 🪙 코인 상자 클릭 → 선착순 획득(누구나)
     if (cb) { clickCoinBox(cb); e.preventDefault(); return }
-    if (devCoinMode && e.button === 0 && !(window.HGMenu && window.HGMenu.isOpen())) { spawnCoinBox(e.clientX / canvas.clientWidth, e.clientY / canvas.clientHeight, devCoinMode); e.preventDefault(); return }   // 개발자 모드: 메뉴 닫힌 상태에서 좌클릭 지점에 상자 생성
+    if (devCoinMode && e.button === 0 && !anyMenuOpen()) { spawnCoinBox(e.clientX / canvas.clientWidth, e.clientY / canvas.clientHeight, devCoinMode); e.preventDefault(); return }   // 개발자 모드: 메뉴 닫힌 상태에서 좌클릭 지점에 상자 생성
     const gh = hitGift(e.clientX, e.clientY)   // 🎁 clicked a gift box? (내 것=바로 오픈 / 상대 것=대신 클릭→소유자 획득)
     if (gh) { if (gh.owner === 'me') claimGift(); else requestPeerGift(gh.owner); e.preventDefault(); return }
     if (editing || wx == null) return
     const onCat = e.clientX >= wx && e.clientX <= wx + cellPxW && e.clientY >= wy && e.clientY <= wy + cellPxH
     // 메뉴 열린 상태: 캐릭터 밖 클릭 → 닫기 / 캐릭터 클릭 → 드래그(메뉴 유지·추종)
-    if (window.HGMenu && window.HGMenu.isOpen() && !onCat) { window.HGMenu.close(); return }
+    // 오버레이는 focusable:false라 클릭해도 메뉴 창이 blur되지 않는다 → 캐릭터 밖 클릭 닫기는 여기서 직접
+    if (anyMenuOpen() && !onCat) { closeMenuWin(); if (window.HGMenu && window.HGMenu.isOpen()) window.HGMenu.close(); return }
     if (onCat) dragging = { dx: e.clientX - wx, dy: e.clientY - wy }
   })
   window.addEventListener('mouseup', () => {

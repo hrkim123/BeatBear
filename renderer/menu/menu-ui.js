@@ -306,6 +306,7 @@
   let gachaPick = null   // 캡슐에 보여줄 랜덤 아이템 세트(소환 화면 새로 접근할 때마다 갱신)
   let craftMode = 0, craftSel = [], craftResult = null   // 조합: 0=꾸미기·1=무기, 선택 재료, 결과
   let previewTiles = [], previewRAF = 0   // 이펙트(불/빛/눈물) 미리보기 타일 애니메이션
+  let keyCapturing = false   // 단축키 캡처 대기(…) 중 — 이때 외부 refresh가 들어오면 버튼이 사라진다
   let wsSel = 0       // 무기 설정에서 선택된 단축키 슬롯(0/1/2)
   let deckSet = 'A'   // 덱 편성 대상 세트
   let deckCat = 'unit' // 덱 카탈로그 필터(unit/weapon)
@@ -434,18 +435,18 @@
         const noneBtn = pop.querySelector('#hgm-modnone'); if (noneBtn) noneBtn.onclick = () => setMod('none')
         const modBtn = pop.querySelector('#hgm-mod')
         if (modBtn) modBtn.onclick = () => {
-          modBtn.textContent = '…'
+          modBtn.textContent = '…'; keyCapturing = true
           if (B.setFocusable) B.setFocusable(true)   // 키 입력 캡처엔 창 포커스 필요(캡처 동안만)
-          const onk = (e) => { e.preventDefault(); e.stopPropagation(); window.removeEventListener('keydown', onk, true); if (B.setFocusable) B.setFocusable(!!root); const name = modKeyName(e); if (name) setMod(name); else rr() }
+          const onk = (e) => { e.preventDefault(); e.stopPropagation(); window.removeEventListener('keydown', onk, true); keyCapturing = false; if (B.setFocusable) B.setFocusable(!!root); const name = modKeyName(e); if (name) setMod(name); else rr() }
           window.addEventListener('keydown', onk, true)
         }
         pop.querySelectorAll('.hgm-keycap[data-slot]').forEach((btn) => {
           btn.onclick = () => {
-            const slot = +btn.dataset.slot; btn.textContent = '…'
+            const slot = +btn.dataset.slot; btn.textContent = '…'; keyCapturing = true
             if (B.setFocusable) B.setFocusable(true)   // 키 입력 캡처엔 창 포커스 필요(캡처 동안만)
             const onk = (e) => {
               e.preventDefault(); e.stopPropagation()
-              window.removeEventListener('keydown', onk, true); if (B.setFocusable) B.setFocusable(!!root)   // 메뉴 열려 있으면 유지(입력칸 타이핑 가능)
+              window.removeEventListener('keydown', onk, true); keyCapturing = false; if (B.setFocusable) B.setFocusable(!!root)   // 메뉴 열려 있으면 유지(입력칸 타이핑 가능)
               const name = keyName(e)
               if (name) { const keys = kb.keys.slice(); keys[slot] = name; if (B.setKeybinds) B.setKeybinds({ mod: kb.mod, keys }) }
               rr()
@@ -979,8 +980,17 @@
     // (클릭 시점마다 토글하면 focus/blur가 반복되며 오버레이가 심하게 깜빡인다 — 하지 말 것)
     if (B.setFocusable) B.setFocusable(true)
   }
-  function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; if (B.setFocusable) B.setFocusable(false); hostSync(); if (window.HGMENU_ON_CLOSE) window.HGMENU_ON_CLOSE() }   // 메뉴 닫힘: focusable 해제 + (별도 창 모드) 창도 숨김
-  function refresh() { if (root && curPop) render(curPop) }   // 로스터 등 변화 시 앱이 호출
+  function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; keyCapturing = false; gachaRolling = false; if (B.setFocusable) B.setFocusable(false); hostSync(); if (window.HGMENU_ON_CLOSE) window.HGMENU_ON_CLOSE() }   // 메뉴 닫힘: focusable 해제 + (별도 창 모드) 창도 숨김
+  // 로스터·스냅샷 등 외부 변화 시 앱(또는 메뉴 창 브리지)이 호출.
+  // 별도 창 모드에선 액션마다 스냅샷이 푸시돼 호출이 잦다 → 진행 중인 연출/입력을 innerHTML 재생성으로
+  // 파괴하지 않게 그럴 때만 건너뛴다(§7 함정). 다음 사용자 조작의 rr()에서 어차피 최신으로 그려진다.
+  function refresh() {
+    if (!root || !curPop) return
+    if (gachaRolling || keyCapturing) return                 // 뽑기 연출 중 · 단축키 캡처 대기 중
+    const ae = document.activeElement
+    if (ae && curPop.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return   // 서버 주소 등 타이핑 중
+    render(curPop)
+  }
   function reposition(a) { if (root && curPop) { if (a) lastAnchor = a; position(curPop, lastAnchor) } }   // 캐릭터 드래그 시 앱이 매 틱 호출
 
   function onKey(e) { if (onKey.active && e.key === 'Escape') { e.preventDefault(); if (closeOddsModal()) return; close() } }   // Esc: 확률 팝업 먼저 닫기

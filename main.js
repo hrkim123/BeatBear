@@ -317,9 +317,13 @@ function openMenuWindow(payload) {
 }
 function closeMenuWindow() {
   if (!menuWin || menuWin.isDestroyed()) return
+  // 숨기기 전에 메뉴 DOM을 확실히 헐어둔다 — 안 그러면 다음에 열 때 옛 DOM이 그대로 남아
+  // menu-init의 open()이 토글로 먹혀(이미 열림) 스냅샷이 반영되지 않는다.
+  try { menuWin.webContents.send('menu-close') } catch (e) {}
   menuWin.hide(); menuFocused = false
   if (win && !win.isDestroyed()) win.webContents.send('menu-was-closed')
 }
+function menuWinOpen() { return !!(menuWin && !menuWin.isDestroyed() && menuWin.isVisible()) }
 ipcMain.on('menu-open', (_e, payload) => openMenuWindow(payload))
 ipcMain.on('menu-close-req', () => closeMenuWindow())
 ipcMain.on('menu-move', (_e, anchor) => { if (menuWin && !menuWin.isDestroyed() && menuWin.isVisible()) menuWin.setBounds(menuBounds(anchor)) })
@@ -396,13 +400,16 @@ function pushToTop() {
   require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {})
 }
 // 작업표시줄 클릭 후 z-order 복구 예약. pushToTop은 PowerShell을 띄우므로 디바운스+레이트 제한.
+// ⚠ pushToTop은 전체화면 투명 오버레이를 재합성시켜 눈에 띄는 깜빡임을 만든다 → 조건을 최대한 좁힌다:
+//    "뒤로 보내기 OFF" + "메뉴/모달 전부 닫힘"일 때만. (메뉴 조작 중 깜빡임 = 이 작업의 제거 대상)
+function topReassertAllowed() { return !desktopMode && !forceInteractive && !menuWinOpen() }
 let topReassertT = null, topReassertAt = 0
 function scheduleTopReassert() {
-  if (topReassertT) return
+  if (topReassertT || !topReassertAllowed()) return
   const now = Date.now(), wait = Math.max(280, 1400 - (now - topReassertAt))
   topReassertT = setTimeout(() => {
     topReassertT = null; topReassertAt = Date.now()
-    if (!desktopMode) pushToTop()
+    if (topReassertAllowed()) pushToTop()   // 대기 중에 메뉴가 열렸으면 취소
   }, wait)
 }
 // 창 레이어 적용: 바탕화면 모드=맨 뒤(topmost 해제), 아니면=스크린세이버급 최상단 + 작업표시줄 위 강제.
