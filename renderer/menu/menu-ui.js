@@ -805,9 +805,9 @@
         pop.querySelectorAll('[data-ag]').forEach((h) => { const s = +(h.dataset.hs || 30); h.appendChild(appearThumb({ group: h.dataset.ag, value: h.dataset.av }, s, s, res)) })
         const rev = pop.querySelector('.hgm-reveal')   // 획득 화면 클릭 → 대기 화면으로 복귀
         if (rev) rev.addEventListener('click', () => { gachaResult = null; rr() })
-        pop.querySelectorAll('[data-roll]').forEach((b) => b.onclick = () => {
+        pop.querySelectorAll('[data-roll]').forEach((b) => b.onclick = async () => {
           if (gachaRolling) return
-          const items = B.rollGacha ? B.rollGacha(kind, +b.dataset.roll) : []
+          const items = (B.rollGacha ? await B.rollGacha(kind, +b.dataset.roll) : []) || []   // 별도 창 모드에선 Promise
           if (!items.length) return
           gachaPending = { kind, items }; gachaRolling = true; gachaResult = null
           const stageEl = pop.querySelector('.hgm-gstage')
@@ -900,11 +900,11 @@
         pop.querySelectorAll('[data-mat]').forEach((el) => el.onclick = () => { if (el.classList.contains('lock')) return; if (craftSel.length < 5) { craftResult = null; craftSel.push(el.dataset.mat); rr() } })
         pop.querySelectorAll('[data-cslot]').forEach((el) => el.onclick = () => { const i = +el.dataset.cslot; if (craftSel[i] != null) { craftSel.splice(i, 1); rr() } })
         const cc = pop.querySelector('[data-cclear]'); if (cc) cc.onclick = () => { craftSel = []; rr() }
-        const cb = pop.querySelector('[data-craft]'); if (cb) cb.onclick = () => {
+        const cb = pop.querySelector('[data-craft]'); if (cb) cb.onclick = async () => {
           if (craftSel.length !== 5) return
           let res
-          if (kind === 'appear') res = B.craftAppear ? B.craftAppear(craftSel.map((k) => { const p = k.split('|'); return { group: p[0], value: p[1] } })) : { ok: false }
-          else res = B.craftWeapon ? B.craftWeapon(craftSel.slice()) : { ok: false }
+          if (kind === 'appear') res = B.craftAppear ? await B.craftAppear(craftSel.map((k) => { const p = k.split('|'); return { group: p[0], value: p[1] } })) : { ok: false }
+          else res = B.craftWeapon ? await B.craftWeapon(craftSel.slice()) : { ok: false }
           if (res && res.ok) { craftResult = kind === 'appear' ? { kind, group: res.group, value: res.value, dup: res.dup } : { kind, id: res.id, name: (res.entry && res.entry.name) || res.id, dup: res.dup }; craftSel = [] }
           rr()
         }
@@ -950,6 +950,7 @@
   // 팝업은 고정 크기(내부 스크롤). 캐릭터 위에 붙이되 화면 밖으로 나가면 클램프.
   const POP_W = 364, POP_H = 540
   function position(pop, a) {
+    if (window.HGMENU_WINDOW_MODE) { pop.style.left = '8px'; pop.style.top = '8px'; pop.style.bottom = 'auto'; return }   // 별도 창: 창 자체가 배치되므로 안쪽 고정
     const vw = window.innerWidth, vh = window.innerHeight
     const H = Math.min(POP_H, vh - 20)
     let left, top
@@ -978,7 +979,7 @@
     // (클릭 시점마다 토글하면 focus/blur가 반복되며 오버레이가 심하게 깜빡인다 — 하지 말 것)
     if (B.setFocusable) B.setFocusable(true)
   }
-  function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; if (B.setFocusable) B.setFocusable(false); hostSync() }   // 메뉴 닫힘: focusable 확실히 해제
+  function close() { closeOddsModal(); stopPreviewAnim(); if (!root) return; root.remove(); root = null; curPop = null; onKey.active = false; if (B.setFocusable) B.setFocusable(false); hostSync(); if (window.HGMENU_ON_CLOSE) window.HGMENU_ON_CLOSE() }   // 메뉴 닫힘: focusable 해제 + (별도 창 모드) 창도 숨김
   function refresh() { if (root && curPop) render(curPop) }   // 로스터 등 변화 시 앱이 호출
   function reposition(a) { if (root && curPop) { if (a) lastAnchor = a; position(curPop, lastAnchor) } }   // 캐릭터 드래그 시 앱이 매 틱 호출
 

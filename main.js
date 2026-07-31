@@ -273,6 +273,62 @@ function toggleSettings() {
   openSettings()
 }
 
+// ---------- 🍔 햄버거 메뉴 전용 창 ----------
+// 메뉴를 오버레이 DOM이 아니라 별도 BrowserWindow로 띄운다. 오버레이의 z-order·포커스를 전혀 건드리지
+// 않으므로 "뒤로 보내기 ON이어도 메뉴만 최상단" + 투명 오버레이 재합성 깜빡임 제거가 동시에 해결된다.
+const MENU_W = 380, MENU_H = 556          // 팝업 364x540 + 여백(그림자)
+let menuWin = null, menuFocused = false
+function menuBounds(anchor) {             // anchor: 오버레이 좌표계의 캐릭터 위젯 rect
+  const wa = activeDisplay().workArea
+  let sx, sy
+  if (anchor && anchor.w != null) {
+    sx = winOrigin.x + anchor.x + anchor.w / 2 - MENU_W / 2
+    sy = winOrigin.y + anchor.y - 8 - MENU_H          // 캐릭터 위
+  } else { sx = wa.x + (wa.width - MENU_W) / 2; sy = wa.y + wa.height - 90 - MENU_H }
+  sx = Math.round(Math.max(wa.x + 4, Math.min(sx, wa.x + wa.width - MENU_W - 4)))
+  sy = Math.round(Math.max(wa.y + 4, Math.min(sy, wa.y + wa.height - MENU_H - 4)))
+  return { x: sx, y: sy, width: MENU_W, height: MENU_H }
+}
+function openMenuWindow(payload) {
+  const b = menuBounds(payload && payload.anchor)
+  if (menuWin && !menuWin.isDestroyed()) {
+    menuWin.setBounds(b); menuWin.showInactive(); menuWin.focus()
+    menuWin.webContents.send('menu-init', payload)
+    return
+  }
+  menuWin = new BrowserWindow({
+    ...b,
+    frame: false, transparent: true, resizable: false, movable: false,
+    minimizable: false, maximizable: false, skipTaskbar: true, hasShadow: false,
+    alwaysOnTop: true, show: false, backgroundColor: '#00000000',
+    webPreferences: { preload: path.join(__dirname, 'preload-menu.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+  })
+  menuWin.setAlwaysOnTop(true, 'screen-saver')   // 오버레이(screen-saver급)보다 뒤로 안 가게
+  menuWin.setMenu(null)
+  menuWin.loadFile(path.join(__dirname, 'renderer', 'menu', 'menu-window.html'))
+  menuWin.once('ready-to-show', () => {
+    if (!menuWin || menuWin.isDestroyed()) return
+    menuWin.show(); menuWin.focus()
+    menuWin.webContents.send('menu-init', payload)
+  })
+  menuWin.on('focus', () => { menuFocused = true })     // 포커스 중엔 전역 키를 캐릭터로 보내지 않음(타이핑 보호)
+  menuWin.on('blur', () => { menuFocused = false; closeMenuWindow() })   // 바깥 클릭 = 닫기(팝업 표준 동작)
+  menuWin.on('closed', () => { menuWin = null; menuFocused = false; if (win && !win.isDestroyed()) win.webContents.send('menu-was-closed') })
+}
+function closeMenuWindow() {
+  if (!menuWin || menuWin.isDestroyed()) return
+  menuWin.hide(); menuFocused = false
+  if (win && !win.isDestroyed()) win.webContents.send('menu-was-closed')
+}
+ipcMain.on('menu-open', (_e, payload) => openMenuWindow(payload))
+ipcMain.on('menu-close-req', () => closeMenuWindow())
+ipcMain.on('menu-move', (_e, anchor) => { if (menuWin && !menuWin.isDestroyed() && menuWin.isVisible()) menuWin.setBounds(menuBounds(anchor)) })
+ipcMain.on('menu-snap', (_e, snap) => { if (menuWin && !menuWin.isDestroyed()) menuWin.webContents.send('menu-snap', snap) })
+ipcMain.on('menu-action', (_e, m) => { if (win && !win.isDestroyed()) win.webContents.send('menu-action', m) })          // 메뉴 → 오버레이(동작)
+ipcMain.on('menu-invoke', (_e, m) => { if (win && !win.isDestroyed()) win.webContents.send('menu-invoke', m) })          // 메뉴 → 오버레이(반환값 필요)
+ipcMain.on('menu-invoke-result', (_e, m) => { if (menuWin && !menuWin.isDestroyed()) menuWin.webContents.send('menu-invoke-result', m) })
+ipcMain.on('menu-closed', () => closeMenuWindow())
+
 function openSettings() {
   if (settingsWin && !settingsWin.isDestroyed()) {
     settingsWin.show(); settingsWin.moveTop(); settingsWin.focus(); return
@@ -503,15 +559,16 @@ app.whenReady().then(() => {
         slotHeld.add(e.keycode)
         if (win && !win.isDestroyed()) win.webContents.send('command', { t: 'fire-slot', slot: slotKeyMap[e.keycode], down: true })
       }
-      if ((humanActive || gatlingActive || antMechaActive) && MOVE_KEYS[e.keycode] && win && !win.isDestroyed()) {
+      // 메뉴 창에서 타이핑 중(서버 주소 등)에는 WASD·Q·R 등을 캐릭터로 보내지 않는다.
+      if (!menuFocused && (humanActive || gatlingActive || antMechaActive) && MOVE_KEYS[e.keycode] && win && !win.isDestroyed()) {
         win.webContents.send('command', { t: 'human-key', key: MOVE_KEYS[e.keycode], down: true })
       }
       // Ctrl+` : toggle the ant mecha's human ⇄ ant form (only while a mecha is active)
-      if (antMechaActive && e.keycode === UiohookKey.Backquote && isCtrl() && win && !win.isDestroyed()) {
+      if (!menuFocused && antMechaActive && e.keycode === UiohookKey.Backquote && isCtrl() && win && !win.isDestroyed()) {
         win.webContents.send('command', { t: 'mecha-transform' })
       }
       // Ctrl+` : 🐉 초사이언 변신/해제 (인간 소환체 활성 시)
-      if (humanActive && e.keycode === UiohookKey.Backquote && isCtrl() && win && !win.isDestroyed()) {
+      if (!menuFocused && humanActive && e.keycode === UiohookKey.Backquote && isCtrl() && win && !win.isDestroyed()) {
         win.webContents.send('command', { t: 'human-transform' })
       }
     })

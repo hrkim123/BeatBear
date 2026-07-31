@@ -169,6 +169,7 @@
   let coinBoxHits = []          // per-frame [{ box, x, y, r }]
   let coinBoxSeq = 0
   let devCoinMode = null        // null | 'paw' | 'grizzle'
+  let MENU_BRIDGE = null        // 🍔 메뉴 실제 구현(오버레이 소유). 별도 창 전환 시 IPC 디스패처가 이걸 호출한다.
   let devTestBeam = false       // 🛠 개발자 전용: 화면 중앙을 가로지르는 테스트 빔(가짜 상대 빔) — 합체/대치 솔로 확인용
   function saveGiftState() { try { localStorage.setItem('giftProgress', String(Math.round(giftProgress))); if (myGift && myGift.state !== 'open') localStorage.setItem('giftPending', String(myGift.type)); else localStorage.removeItem('giftPending') } catch {} }
   function awardGift(type) { if (type === 0) addPawCoin(1); else if (window.BattleGacha) window.BattleGacha.addGems(1); try { showToast(type === 0 ? `🎁 ${coinIco('paw')} 파우 코인 +1` : `🎁 ${coinIco('grizzle')} 그리즐 코인 +1`) } catch {} pushState() }
@@ -1243,7 +1244,9 @@
       quit: () => { try { inputSource.quit() } catch (e) {} }, // ⏻ 비트베어 종료
     })
     // 새 햄버거 팝업(HGMenu)에 실제 로직 주입 — 2단계: 멀티/편의성/설정 이관
-    if (window.HGMenu) window.HGMenu.setBridges({
+    // ⭐ 메뉴는 별도 창에서 렌더되므로 이 객체는 "메뉴 창이 IPC로 호출하는 실제 구현"이자 스냅샷 소스다.
+    //    상태(BattleGacha 등)는 오버레이(여기)가 단독 소유하고, 메뉴 창은 스냅샷만 읽는다.
+    MENU_BRIDGE = {
       getServer: () => localStorage.getItem('server') || 'ws://localhost:8787',
       isConnected: () => connected(),
       connect: (url) => connect(url),
@@ -1331,8 +1334,10 @@
         if (out.length) pushState()
         return out
       },
-    })
+    }
+    if (window.HGMenu) window.HGMenu.setBridges(MENU_BRIDGE)   // 오버레이에도 유지(coinIcon 등 공용 유틸 사용)
     window.__bgModalChanged = () => sendHotzone()   // 배틀 팝업 열림/닫힘 → hotzone 갱신
+    // TODO(메뉴 별도 창 2단계): 아래를 openMenuWin()으로 교체 예정. 스냅샷 빌더·액션 디스패처 배선 완료 후 전환.
     menuBtn.onclick = () => { if (window.HGMenu) window.HGMenu.open({ x: wx, y: wy, w: cellPxW, h: cellPxH }); else window.BattleGachaUI.openMenu(); sendHotzone() }
     // 떠있던 개별 버튼 숨김 — 전부 메뉴로 통합 (인라인 display 로 이후 재노출 방지)
     for (const b of [shopBtn, achvBtn, peaceBtn]) if (b) b.style.display = 'none'
