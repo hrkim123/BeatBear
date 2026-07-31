@@ -2818,9 +2818,18 @@
       const t = cl.s * maxD
       if (t < minT) continue
       const dot = mdx * rdx + mdy * rdy                                     // 방향 내적: >0 같은 쪽(합체) / ≤0 반대(충돌) — 사각지대 없음
-      // rt = 상대 빔의 "자기 최근접점"까지 거리. 각 빔을 자기 최근접점에서 잘라야 근평행에서도 끝이 안 어긋난다
-      // (내 접촉점을 상대 광선에 재투영하면 얕은 각도에서 offset/tan(θ)만큼 수백 px 밀린다).
-      const rec = { R, t, rt: cl.t * rlen, cx: cl.mx, cy: cl.my, rox, roy, dot, rdx, rdy }
+      // 접촉 지점: 두 빔이 실제로 "교차"하면 교차점을 쓴다.
+      // 최근접점 방식은 두 빔이 완만한 각도로 만날 때 최근접 구간이 길게 늘어져 지점이 불안정해진다
+      // (그래서 얕은 각도에서만 충돌 지점이 떠 보였다). 교차점은 각도와 무관하게 한 점으로 확정된다.
+      let ct = t, crt = cl.t * rlen, ccx = cl.mx, ccy = cl.my
+      const den = mdx * rdy - mdy * rdx
+      if (Math.abs(den) > 1e-3) {
+        const ex2 = rox - mox, ey2 = roy - moy
+        const ti = (ex2 * rdy - ey2 * rdx) / den      // 내 광선에서의 교차 거리
+        const ui = (ex2 * mdy - ey2 * mdx) / den      // 상대 광선에서의 교차 거리
+        if (ti > minT && ti < maxD && ui > 0 && ui < rlen) { ct = ti; crt = ui; ccx = mox + mdx * ti; ccy = moy + mdy * ti }
+      }
+      const rec = { R, t: ct, rt: crt, cx: ccx, cy: ccy, rox, roy, dot, rdx, rdy }
       if (dot > 0) allies.push(rec); else foes.push(rec)
     }
     const strM = b.st + allies.reduce((n, a) => n + (a.R.st || 1), 0)   // 내 편 총 세력
