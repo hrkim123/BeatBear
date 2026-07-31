@@ -9,7 +9,7 @@ GitHub 저장소 **`hrkim123/BeatBear`** 하나만 있으면 어디서든 이어
 3. (개발자 재화 해금) `setx BEATBEAR_DEV 1` 후 새 셸 · (릴리스 배포) `setx GH_TOKEN "<repo write PAT>"` 후 새 셸
 4. `git config user.name/email` 설정 · `npm start` 로 오버레이 실행(멀티 필요 시 `npm run server`)
 5. **읽는 순서**: 이 문서(§1~§7) → `SPEC.md`(회귀 금지) → `docs/`(battle-mode·menu-redesign·beatbear-overview) → 코드
-- **현재 상태(2026-07)**: 앱=**BeatBear**(곰 단일 캐릭터), appId=`com.hrkim.beatbear`, 버전 `0.1.0`, publish=`hrkim123/BeatBear`. 햄버거 메뉴 대개편·곰 아트·꾸미기(외형/책상/키보드/마우스)·소환/컬렉션/미니게임(무기설정·덱·배틀신청·업적)·편의성·설정(옵션·단축키) 구현 완료. 서버 exe 런처(항상 최신 릴리스) 완비.
+- **현재 상태(2026-07-31)**: 앱=**BeatBear**(곰 단일 캐릭터), appId=`com.hrkim.beatbear`, 버전 `0.2.0`(배포 완료), `PROTOCOL_VERSION=4`, publish=`hrkim123/BeatBear`. 햄버거 메뉴 대개편·곰 아트·꾸미기(외형/책상/키보드/마우스)·소환/컬렉션/미니게임(무기설정·덱·배틀신청·업적)·편의성·설정(옵션·단축키) 구현 완료. 서버 exe 런처(항상 최신 릴리스) 완비.
 - **이름 규칙**: 코드/문서/UI 어디에도 이전 이름(HongGoCat)·"Bongo Cat/봉고캣" 흔적 없음(저작권). 새 기능 추가 시에도 BeatBear 유지. 내부 API=`window.beatbear`.
 
 ## 0. 이 프로젝트는
@@ -21,7 +21,8 @@ GitHub 저장소 **`hrkim123/BeatBear`** 하나만 있으면 어디서든 이어
 
 - **[SPEC.md](SPEC.md)** — 확정 동작 + **회귀 금지 규칙**. 수정 전 반드시 §2를 읽고, 여기 확정된 동작을 깨지 않게 작업한다. 사소한 변경도 §2·§3에 갱신.
 - **[docs/battle-mode.md](docs/battle-mode.md)** — 배틀 모드 전체 설계 + **N차 개발 이력**(가장 최근이 위). 배틀 관련 작업의 단일 진실원.
-- **[docs/menu-redesign.md](docs/menu-redesign.md)** — 🚧 **진행 중: 햄버거 메뉴 대개편**(레퍼런스 스타일 팝업). 요구사항 16개 + **구현 진행 상황**(어디까지 됐는지) 단일 기준. 새 세션은 이 문서부터 읽고 이어서 작업. 팝업 UI=`renderer/menu/menu-ui.js`, **메뉴 전용 창**=`renderer/menu/menu-window.html`+`menu-bridge.js`+`preload-menu.js`+`main.js`, 연결=`renderer/app.js`(`MENU_BRIDGE`·`buildMenuSnap`·액션 디스패처). ⚠️ 상태는 오버레이 단독 소유 — 메뉴 창엔 `battle/gacha.js` 로드 금지(SPEC.md §2 참고).- **[README.md](README.md)** — 실행·꾸미기·멀티 개요.
+- **[docs/menu-redesign.md](docs/menu-redesign.md)** — 🚧 **진행 중: 햄버거 메뉴 대개편**(레퍼런스 스타일 팝업). 요구사항 16개 + **구현 진행 상황**(어디까지 됐는지) 단일 기준. 새 세션은 이 문서부터 읽고 이어서 작업. 팝업 UI=`renderer/menu/menu-ui.js`, **메뉴 전용 창**=`renderer/menu/menu-window.html`+`menu-bridge.js`+`preload-menu.js`+`main.js`, 연결=`renderer/app.js`(`MENU_BRIDGE`·`buildMenuSnap`·액션 디스패처). ⚠️ 상태는 오버레이 단독 소유 — 메뉴 창엔 `battle/gacha.js` 로드 금지(SPEC.md §2 참고).
+- **[README.md](README.md)** — 실행·꾸미기·멀티 개요.
 - **[DISTRIBUTE.md](DISTRIBUTE.md)** — 배포·자동 업데이트·GH_TOKEN·개발자 모드 세팅.
 
 ## 2. 환경 세팅 (새 머신 1회)
@@ -34,7 +35,7 @@ npm install                 # node_modules는 저장소에 없음. 네이티브 
 - **개발자 기능 잠금해제**(가챠/재화 등): `setx BEATBEAR_DEV 1` 후 새 셸. (preload.js가 이 env로 `isDev` 판정 — 친구 배포본엔 없어 못 씀)
 - **릴레이 서버 주소**: 클라이언트 기본값 `ws://localhost:8787`. 하드코딩 아님 — 설정 창에서 변경(localStorage `server`). 다른 호스트면 그 주소 입력.
 - **모델2 = 서버가 곧 방** (2026-07-27~): **방 코드 개념 제거**. 접속 대상은 서버 IP로만 구분하고, 클라는 내부적으로 고정 방 `MAIN`에 입장한다(`FIXED_ROOM`). 서버 코드는 방 기반 그대로 유지(변경 최소화). 다른 그룹 = 서버를 하나 더 띄움.
-- **프로토콜 게이트(v0.1.7~)**: 접속 허용 기준은 앱 버전이 아니라 **`PROTOCOL_VERSION`**(클라 `renderer/app.js` ↔ 서버 `server/server.js` 공용 상수, 현재 `4` — 1:최초, 2:개발자 코인 상자, 3:🐉 SSJ 시각 동기화(human에 ssj/fly/pose 필드 + beam/kiballs 타입), 4:beam에 len(막힌 길이)·blk(충돌) 추가로 빔 막힘 지점 양쪽 일치). 클라가 join에 `proto`를 보내고 서버가 `PROTOCOL_VERSION`과 일치할 때만 허용. **서버와 주고받는 메시지 규약(타입·필드·좌표계 등 양쪽이 동일 해석해야 하는 것)이 바뀔 때만 이 값을 +1** 하고, 그때는 클라·서버 동시에 올린 뒤 **서버 재시작 + 전원 업데이트** 필요. **클라 전용(서버 무관) 릴리스는 `PROTOCOL_VERSION` 그대로 두면 서버 재시작 없이 구·신 클라가 함께 접속**(0.1.4~0.1.6 같은 케이스). `SERVER_VERSION`(env→package.json)은 이제 표시·로깅용.
+- **프로토콜 게이트(v0.1.7~)**: 접속 허용 기준은 앱 버전이 아니라 **`PROTOCOL_VERSION`**(클라 `renderer/app.js` ↔ 서버 `server/server.js` 공용 상수, 현재 `5` — 1:최초, 2:개발자 코인 상자, 3:🐉 SSJ 시각 동기화(human에 ssj/fly/pose 필드 + beam/kiballs 타입), 4:beam에 len(막힌 길이)·blk(충돌) 추가로 빔 막힘 지점 양쪽 일치, 5:beam에 bang(굴절각)·blen(굴절 구간 길이)·bblk 추가로 굴절을 소유자가 계산해 전송). 클라가 join에 `proto`를 보내고 서버가 `PROTOCOL_VERSION`과 일치할 때만 허용. **서버와 주고받는 메시지 규약(타입·필드·좌표계 등 양쪽이 동일 해석해야 하는 것)이 바뀔 때만 이 값을 +1** 하고, 그때는 클라·서버 동시에 올린 뒤 **서버 재시작 + 전원 업데이트** 필요. **클라 전용(서버 무관) 릴리스는 `PROTOCOL_VERSION` 그대로 두면 서버 재시작 없이 구·신 클라가 함께 접속**(0.1.4~0.1.6 같은 케이스). `SERVER_VERSION`(env→package.json)은 이제 표시·로깅용.
 - git 사용자 설정: `git config user.name` / `user.email` (커밋이 "unknown"으로 찍히지 않게).
 - Windows 개발자 모드 ON(빌드 시 심볼릭 링크) — DISTRIBUTE.md §0 참고.
 

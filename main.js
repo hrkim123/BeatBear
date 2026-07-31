@@ -228,6 +228,9 @@ function moveToNextDisplay() {
   winOrigin = { x: b.x, y: b.y }
   win.setBounds(overlayBounds(b))
   stripWin11Chrome(win) // re-assert no-border after the move, just in case
+  // 모니터를 옮기면 옮겨간 쪽 작업표시줄(Shell_TrayWnd)이 topmost가 되며 우리 위로 올라온다
+  // → 땅 파임이 작업표시줄에 가려진다(2026-07-31 실측으로 재현). 그 자리에서 한 번 재삽입.
+  if (!desktopMode) pushToTop()
   hotzone = defaultHotzone()
   sendLayout()
 }
@@ -323,7 +326,6 @@ function closeMenuWindow() {
   menuWin.hide(); menuFocused = false
   if (win && !win.isDestroyed()) win.webContents.send('menu-was-closed')
 }
-function menuWinOpen() { return !!(menuWin && !menuWin.isDestroyed() && menuWin.isVisible()) }
 ipcMain.on('menu-open', (_e, payload) => openMenuWindow(payload))
 ipcMain.on('menu-close-req', () => closeMenuWindow())
 ipcMain.on('menu-move', (_e, anchor) => { if (menuWin && !menuWin.isDestroyed() && menuWin.isVisible()) menuWin.setBounds(menuBounds(anchor)) })
@@ -384,40 +386,29 @@ function pushToBottom() {
   ].join('; ')
   require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {})
 }
-// 창을 z-order 최상단(HWND_TOPMOST)으로 명시 재삽입. focusable:false(non-activating) 상태에선
-// setAlwaysOnTop만으론 작업표시줄(자체 topmost) 위로 안 올라가, 땅 파임 영역이 작업표시줄에 가려진다.
-// SWP_NOACTIVATE로 포커스는 안 뺏으면서 topmost 밴드 맨 위로 재삽입 → 작업표시줄 위로 복귀.
+// 창을 topmost 밴드 맨 위로 재삽입. 같은 topmost끼리는 나중에 삽입된 쪽이 위라서,
+// 작업표시줄이 topmost로 승격하면(모니터 전환 시) 우리가 밀려 땅 파임이 가려진다 → 그때 다시 올린다.
+// (옛 주석은 "setAlwaysOnTop만으론 부족"이라 했지만, false→true 재설정은 실제로 재삽입된다 — 2026-07-31 실측)
 function pushToTop() {
   if (process.platform !== 'win32' || !win || win.isDestroyed()) return
-  let hwnd
-  try { const buf = win.getNativeWindowHandle(); hwnd = (buf.length >= 8 ? buf.readBigUInt64LE(0) : BigInt(buf.readUInt32LE(0))).toString() } catch (e) { return }
-  const ps = [
-    'Add-Type -Namespace D -Name Z -MemberDefinition \'[DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr h,System.IntPtr a,int x,int y,int cx,int cy,uint f);\'',
-    `$h=[System.IntPtr]::new([long]${hwnd})`,
-    '$b=[System.IntPtr]::new(-1)',                // HWND_TOPMOST
-    '[D.Z]::SetWindowPos($h,$b,0,0,0,0,0x13)'     // SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE
-  ].join('; ')
-  require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true }, () => {})
+  // Electron 네이티브 재설정만으로 topmost 밴드 맨 위로 재삽입된다(2026-07-31 실측).
+  // 예전엔 PowerShell로 SetWindowPos(HWND_TOPMOST)를 호출했는데, 호출마다 powershell.exe를
+  // spawn하는 비용 + 전체화면 투명 레이어드 창 재합성으로 눈에 띄는 깜빡임이 있었다 → 네이티브로 교체.
+  try { win.setAlwaysOnTop(false); win.setAlwaysOnTop(true, 'screen-saver') } catch (e) {}
 }
-// 작업표시줄 클릭 후 z-order 복구 예약. pushToTop은 PowerShell을 띄우므로 디바운스+레이트 제한.
-// ⚠ pushToTop은 전체화면 투명 오버레이를 재합성시켜 눈에 띄는 깜빡임을 만든다 → 조건을 최대한 좁힌다:
-//    "뒤로 보내기 OFF" + "메뉴/모달 전부 닫힘"일 때만. (메뉴 조작 중 깜빡임 = 이 작업의 제거 대상)
-function topReassertAllowed() { return !desktopMode && !forceInteractive && !menuWinOpen() }
-let topReassertT = null, topReassertAt = 0
-function scheduleTopReassert() {
-  if (topReassertT || !topReassertAllowed()) return
-  const now = Date.now(), wait = Math.max(280, 1400 - (now - topReassertAt))
-  topReassertT = setTimeout(() => {
-    topReassertT = null; topReassertAt = Date.now()
-    if (topReassertAllowed()) pushToTop()   // 대기 중에 메뉴가 열렸으면 취소
-  }, wait)
-}
+// ⛔ 작업표시줄 클릭마다 topmost를 재삽입하던 scheduleTopReassert는 제거했다(2026-07-31, 실측 근거).
+//    · 40초간 실제로 작업표시줄을 클릭(빈공간·앱아이콘·탐색기·다이얼로그)해 z-order를 100ms 간격 샘플링한 결과,
+//      오버레이는 topmost를 한 번도 잃지 않았고 Shell_TrayWnd가 우리 위로 온 적도 없다 → 고칠 게 없었다.
+//    · 반대로 실제로 가려지는 경우는 **모니터 전환**이었다(옮겨간 쪽 작업표시줄이 topmost가 되며 위로 올라오고,
+//      그 상태가 계속 유지됨). 그래서 재삽입은 moveToNextDisplay에서 한 번만 한다.
+//    → 즉 예전 코드는 문제를 안 만드는 트리거에 걸려 있었고(= 깜빡임만 유발), 진짜 트리거는 놓치고 있었다.
+//    ※ 작업표시줄 '자동 숨김' 설정에선 Shell_TrayWnd가 상시 topmost라 양상이 다를 수 있다. 재보고되면 여기서부터 볼 것.
 // 창 레이어 적용: 바탕화면 모드=맨 뒤(topmost 해제), 아니면=스크린세이버급 최상단 + 작업표시줄 위 강제.
 // 단, 바탕화면 모드라도 모달(햄버거 메뉴·채팅·배틀팝업 등 forceInteractive)이 열려 있으면 최상단으로 올림 → 메뉴가 다른 창 뒤로 안 밀림.
 function applyLayer() {
   if (!win || win.isDestroyed()) return
   if (desktopMode && !forceInteractive) { win.setAlwaysOnTop(false); pushToBottom() }
-  else { win.setAlwaysOnTop(true, 'screen-saver'); pushToTop() }
+  else pushToTop()   // pushToTop 자체가 setAlwaysOnTop(false→true 'screen-saver')로 재삽입한다
 }
 // Re-assert the overlay's chrome-free state. Windows re-draws the accent border on the
 // topmost window when ANOTHER window (settings/chat) closes, so call this on those events.
@@ -593,14 +584,7 @@ app.whenReady().then(() => {
     })
     uIOhook.on('mousedown', (e) => {
       sendInput('mouse')
-      // 작업표시줄을 클릭하면 그 앱이 올라오면서 (자체 topmost인) 작업표시줄이 우리 위로 재삽입돼,
-      // 작업표시줄 위에 그리던 땅 파임이 가려진다 → 그때만 topmost 재삽입(PowerShell 호출이라 레이트 제한).
-      if (e && !desktopMode) {
-        try {
-          const wa = activeDisplay().workArea
-          if (e.y >= wa.y + wa.height - 2) scheduleTopReassert()
-        } catch (_) {}
-      }
+      // (작업표시줄 클릭 시 topmost 재삽입은 제거 — 위 pushToTop 주석의 실측 근거 참고)
       // left click (uiohook button 1) → boost missiles + start holding (gatling continuous fire)
       if (e && e.button === 1 && win && !win.isDestroyed()) {
         win.webContents.send('command', { t: 'boost' })

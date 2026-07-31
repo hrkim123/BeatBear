@@ -8,7 +8,7 @@ const SERVER_VERSION = process.env.SERVER_VERSION || (() => { try { return requi
 // ⭐ 접속 게이트는 앱 버전이 아니라 "프로토콜 버전"으로 판정한다. 서버와 주고받는 메시지 규약(타입·필드·좌표계 등
 // 양쪽이 동일하게 해석해야 하는 것)이 바뀔 때만 이 값을 올린다. 클라 전용(서버 무관) 릴리스는 이 값을 그대로 두어
 // 서버 재시작 없이도 구·신 클라가 함께 접속·플레이할 수 있다. **client(app.js)의 PROTOCOL_VERSION과 항상 일치시킬 것.**
-const PROTOCOL_VERSION = 4   // 3 → 4: 🐉 beam에 len(막힌 길이)·blk(충돌) 추가 — 상대 화면에서도 같은 지점에서 막히게
+const PROTOCOL_VERSION = 5   // 4 → 5: 🐉 beam에 bang(굴절각)·blen(굴절 구간 길이)·bblk 추가 — 굴절을 소유자가 계산해 보냄(양쪽 동일)
 
 const wss = new WebSocketServer({ port: PORT })
 const rooms = new Map() // code -> Map<id, { ws, name, animal }>
@@ -131,7 +131,7 @@ wss.on('connection', (ws, req) => {
     } else if (msg.t === 'human') {
       broadcast(joinedRoom, { t: 'human', id, active: msg.active, nx: msg.nx, ny: msg.ny, hp: msg.hp, weapon: msg.weapon, face: msg.face, ssj: msg.ssj, wk: msg.wk, fly: msg.fly, frot: msg.frot, fmov: msg.fmov, pk: msg.pk, pang: msg.pang, ocb: msg.ocb, oamt: msg.oamt, ost: msg.ost, gd: msg.gd, gang: msg.gang, ghp: msg.ghp }, id)   // 🐉 SSJ/비행/포즈/충전/가드 동기화
     } else if (msg.t === 'beam') {
-      broadcast(joinedRoom, { t: 'beam', id, on: msg.on, nx: msg.nx, ny: msg.ny, ang: msg.ang, st: msg.st, len: msg.len, blk: msg.blk }, id)   // 🐉 카메하메파 빔(len=막힌 길이·blk=충돌 → 양쪽 동일 렌더)
+      broadcast(joinedRoom, { t: 'beam', id, on: msg.on, nx: msg.nx, ny: msg.ny, ang: msg.ang, st: msg.st, len: msg.len, blk: msg.blk, bang: msg.bang, blen: msg.blen, bblk: msg.bblk }, id)   // 🐉 카메하메파 빔(len/blk=막힘, bang/blen/bblk=굴절 → 양쪽 동일 렌더)
     } else if (msg.t === 'kiballs' && Array.isArray(msg.list)) {
       broadcast(joinedRoom, { t: 'kiballs', id, list: msg.list.slice(0, 8) }, id)   // 🐉 유도 에네르기파
     } else if (msg.t === 'mecha') {

@@ -246,9 +246,12 @@
     @keyframes hgmreveal{0%{transform:scale(.2) translateY(-14px) rotate(-6deg);opacity:0}55%{transform:scale(1.22) rotate(3deg);opacity:1}74%{transform:scale(.95) rotate(-1deg)}100%{transform:scale(1) rotate(0);opacity:1}}
     /* 확률 팝업(별도 모달) */
     .hgm-omodal{position:fixed;inset:0;z-index:2147483400;display:flex;align-items:center;justify-content:center;background:rgba(40,26,20,.4);font-family:"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}
-    .hgm-ocard{width:300px;max-height:72vh;background:#fbeee3;border:2px solid #e7b9a4;border-radius:14px;display:flex;flex-direction:column;box-shadow:0 14px 30px rgba(120,80,60,.45);overflow:hidden}
-    .hgm-ohd{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;font-weight:800;font-size:14px;color:#5b4238;background:#eab0a0}
-    .hgm-obody{padding:8px 13px 12px;overflow:auto}
+    /* 카드 크기는 항목 수와 무관하게 고정 — 넘치는 만큼만 본문이 스크롤된다.
+       (예전엔 .hgm-obody가 flex 자식 기본값 min-height:auto라 내용보다 작아지지 못해
+        overflow:auto가 발동 못 하고 카드가 계속 늘어났다 → flex:1 + min-height:0 필수) */
+    .hgm-ocard{width:300px;height:calc(100% - 28px);max-height:420px;background:#fbeee3;border:2px solid #e7b9a4;border-radius:14px;display:flex;flex-direction:column;box-shadow:0 14px 30px rgba(120,80,60,.45);overflow:hidden}
+    .hgm-ohd{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;font-weight:800;font-size:14px;color:#5b4238;background:#eab0a0;flex:0 0 auto}
+    .hgm-obody{padding:8px 13px 12px;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
     .hgm-onote{font-size:10.5px;color:#8a705f;margin:2px 0 8px}
     .hgm-ocat{display:flex;justify-content:space-between;font-weight:800;font-size:13px;margin:11px 0 3px;padding-bottom:3px;border-bottom:1.5px dashed #e0c3b2}
     .hgm-oitem{display:flex;justify-content:space-between;font-size:12px;color:#6b4f43;padding:3px 6px;border-radius:6px}

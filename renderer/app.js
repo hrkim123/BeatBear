@@ -888,7 +888,7 @@
   }
 
   const FIXED_ROOM = 'MAIN'   // 모델2: 서버가 곧 방. 방 코드 없이 서버당 단일 공용 방 — 접속 대상은 서버 IP로만 구분
-  const PROTOCOL_VERSION = 4  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속. (4: beam에 len/blk 추가 — 빔 막힘 지점 양쪽 일치)
+  const PROTOCOL_VERSION = 5  // ⭐ 접속 게이트 기준(앱 버전 아님). 서버와의 메시지 규약이 바뀔 때만 올린다(server/server.js와 반드시 일치). 클라 전용 릴리스는 그대로 → 서버 재시작 없이 접속. (5: beam에 bang/blen/bblk 추가 — 굴절을 소유자가 계산해 보냄)
   function connect(url) {
     disconnect()
     setStatus('접속 중…')
@@ -1054,7 +1054,7 @@
         else { remoteHumans.delete(msg.id); remoteBeams.delete(msg.id); remoteKiballs.delete(msg.id) }
       }
       else if (msg.t === 'beam') {   // 🐉 상대 카메하메파
-        if (msg.on) remoteBeams.set(msg.id, { nx: msg.nx, ny: msg.ny, ang: +msg.ang || 0, st: msg.st || 1, len: (msg.len != null ? +msg.len : null), blk: msg.blk || 0, ts: performance.now() })
+        if (msg.on) remoteBeams.set(msg.id, { nx: msg.nx, ny: msg.ny, ang: +msg.ang || 0, st: msg.st || 1, len: (msg.len != null ? +msg.len : null), blk: msg.blk || 0, bang: (msg.bang != null ? +msg.bang : null), blen: (msg.blen != null ? +msg.blen : null), bblk: msg.bblk || 0, ts: performance.now() })   // bang/blen = 소유자가 계산한 굴절(proto5)
         else remoteBeams.delete(msg.id)
       }
       else if (msg.t === 'kiballs') { if (msg.list && msg.list.length) remoteKiballs.set(msg.id, { list: msg.list, ts: performance.now() }); else remoteKiballs.delete(msg.id) }
@@ -4405,7 +4405,7 @@
         const rt0 = _beamClash.cutLen && _beamClash.cutLen.get(rb)
         const cl = Math.max(6 * s, rt0 != null ? rt0 : (_beamClash.cx - ox) * dx + (_beamClash.cy - oy) * dy)   // 상대 빔은 자기 최근접점에서 절단(근평행에서도 끝이 안 어긋남)
         if (cl < len) { len = cl; isG = false }
-        if (_beamClash.type === 'cut' && (rb.st || 1) > (me.beam ? me.beam.st : 0)) {   // 내가 약해서 끊긴 경우 → 상대(강한 쪽)는 굴절해 계속
+        if (rb.bang == null && _beamClash.type === 'cut' && (rb.st || 1) > (me.beam ? me.beam.st : 0)) {   // 구버전 폴백: bang 미수신 시에만 로컬 재계산
           const mdx2 = me.beam ? Math.cos(me.beam.ang) : 0, mdy2 = me.beam ? Math.sin(me.beam.ang) : 0
           const side = Math.sign(mdx2 * -Math.sin(rb.ang) + mdy2 * Math.cos(rb.ang)) || 1
           const sinA2 = Math.abs(mdx2 * Math.sin(rb.ang) - mdy2 * Math.cos(rb.ang))
@@ -4413,14 +4413,16 @@
           bend = { ang: rb.ang + bs, st: rb.st || 1 }
         }
       }
+      // ⭐ proto5: 소유자가 보낸 굴절을 그대로 그린다. 내 빔 생존 여부와 무관 → 양쪽 화면 항상 일치.
+      if (rb.bang != null) bend = { ang: rb.bang, st: rb.st || 1, len: (rb.blen != null && rb.blen > 0) ? rb.blen * W : null, blk: !!rb.bblk }
       else if (rb.len == null && dy > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - oy) / dy; if (gd > 4 * s && gd < len) { len = gd; isG = true } } }   // 구버전 폴백
       ctx.globalAlpha = peerAlpha(pid)
       drawBeam({ ox, oy, ang: rb.ang, st: rb.st }, len, ox + dx * len, oy + dy * len, isG, now)
       if (bend) {   // ⚔ 강한 쪽(상대)은 접촉점부터 굴절해 계속 — 내 화면에서도 동일하게 보이게
         const bxx = ox + dx * len, byy = oy + dy * len, bdx2 = Math.cos(bend.ang), bdy2 = Math.sin(bend.ang)
-        let bl = maxD
-        if (bdy2 > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - byy) / bdy2; if (gd > 4 * s && gd < bl) bl = gd } }
-        drawBeam({ ox: bxx, oy: byy, ang: bend.ang, st: bend.st }, bl, bxx + bdx2 * bl, byy + bdy2 * bl, false, now)
+        let bl = bend.len != null ? bend.len : maxD   // 소유자가 준 굴절 구간 길이 우선(양쪽 동일 지점에서 끝남)
+        if (bend.len == null && bdy2 > 0.02) { const tb = taskbarRect(); if (tb) { const gd = (tb.top - byy) / bdy2; if (gd > 4 * s && gd < bl) bl = gd } }
+        drawBeam({ ox: bxx, oy: byy, ang: bend.ang, st: bend.st }, bl, bxx + bdx2 * bl, byy + bdy2 * bl, !!bend.blk, now)
       }
     }
     ctx.globalAlpha = 1
@@ -7411,7 +7413,14 @@
     } else if (sentHuman) { net.send(JSON.stringify({ t: 'human', active: 0 })); sentHuman = false }
     if (me.beam) {   // 🐉 카메하메파 빔(원점·각도·단계 + ⭐막힌 길이/충돌 여부 → 상대 화면도 같은 지점에서 막힘)
       const o = me.beam
-      net.send(JSON.stringify({ t: 'beam', on: 1, nx: +(o.ox / NW).toFixed(4), ny: +(o.oy / NH).toFixed(4), ang: +o.ang.toFixed(3), st: o.st, len: +((me.beamLen || 0) / NW).toFixed(4), blk: me.beamBlk || 0 })); sentBeam = true
+      // ⭐ proto5: 굴절도 소유자가 계산해서 보낸다(bang=굴절 후 각도, blen=굴절 구간 길이).
+      //    예전엔 받는 쪽이 같은 공식으로 재계산했는데, 그 조건이 "내 빔이 살아 있을 것"이라
+      //    상대 빔이 먼저 끝나면 굴절이 사라져 직선으로 보였다 → 소유자 권한으로 통일.
+      const bc = _beamClash
+      const bent = bc && bc.type === 'bend' && bc.bendAng != null
+      const m = { t: 'beam', on: 1, nx: +(o.ox / NW).toFixed(4), ny: +(o.oy / NH).toFixed(4), ang: +o.ang.toFixed(3), st: o.st, len: +((me.beamLen || 0) / NW).toFixed(4), blk: me.beamBlk || 0 }
+      if (bent) { m.bang = +bc.bendAng.toFixed(3); m.blen = +((bc.bendLen || 0) / NW).toFixed(4); m.bblk = bc.bendBlocked ? 1 : 0 }
+      net.send(JSON.stringify(m)); sentBeam = true
     } else if (sentBeam) { net.send(JSON.stringify({ t: 'beam', on: 0 })); sentBeam = false }
     if (kiballs.length) {
       net.send(JSON.stringify({ t: 'kiballs', list: kiballs.slice(-8).map((p) => ({ nx: +(p.x / NW).toFixed(4), ny: +(p.y / NH).toFixed(4) })) })); sentKi = true

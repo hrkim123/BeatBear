@@ -54,7 +54,7 @@
 - **햄버거 메뉴 = 별도 BrowserWindow**(2026-07-31, 플랜 C). 오버레이 DOM이 아니다.
   - 이유: **뒤로 보내기(desktopMode) ON에서도 메뉴만 최상단**으로 보여야 하고, 메뉴를 열고 닫을 때마다 오버레이 z-order/포커스를 건드려 생기던 **깜빡임**을 없애야 함.
   - ⚠️ **회귀 금지**: 상태는 **오버레이가 단독 소유**한다. 메뉴 창에 `battle/gacha.js`(상태 저장소)를 로드하지 말 것 — 스냅샷 읽기 전용 facade만 사용(상태 이중화 금지). 순수 데이터·아트(`animals.js`/`battle/units.js`/`battle/art.js`)만 로드.
-  - ⚠️ **회귀 금지**: **메뉴가 열려 있는 동안 `pushToTop`/`pushToBottom`(=`applyLayer`)을 호출하지 않는다.** 전체화면 투명 오버레이가 재합성되며 눈에 띄게 깜빡인다. 작업표시줄 클릭 z-order 복구(`scheduleTopReassert`)도 `topReassertAllowed()`(=`!desktopMode && !forceInteractive && !menuWinOpen()`)로 게이트되어 있다 — 조건을 넓히지 말 것.
+  - ⚠️ **회귀 금지**: **메뉴가 열려 있는 동안 `pushToTop`/`pushToBottom`(=`applyLayer`)을 호출하지 않는다.** 전체화면 투명 오버레이가 재합성되며 눈에 띄게 깜빡인다. 메뉴는 오버레이 DOM이 아니므로 hotzone `force`가 뒤집히지 않아 자연히 호출되지 않는다 — 이 성질을 깨지 말 것.
   - 메뉴 창 조작 → `menu-action`/`menu-invoke` → 오버레이 `MENU_BRIDGE` 실행 → `buildMenuSnap()` 재푸시. 새 브리지 함수를 추가하면 **`MENU_BRIDGE`에 구현 + 스냅샷에 필드 추가**를 같이 해야 한다(둘 중 하나만 하면 조용히 기본값이 표시됨).
 
 ### 채팅

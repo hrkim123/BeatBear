@@ -149,11 +149,17 @@
   - **스냅샷**: `app.js buildMenuSnap()` — 파라미터 있는 getter 8종을 맵으로 직렬화(`appearOwned`/`appearCount`={group:{value:…}}, `slotUsable`/`slotEligible`/`inDeck`/`ownedUnits`={id:…}, `craftMats`/`gachaPool`={kind:[…]}, `gachaOdds`=배열). 카탈로그는 메뉴가 쓰는 6필드만 투영(전투 스탯 통째 전송 방지).
   - **디스패처**: `onMenuAction`→`MENU_BRIDGE[fn]` 실행 후 **스냅샷 재푸시**, `onMenuInvoke`(가챠·조합)→결과를 rid로 반환 후 재푸시. 결과는 `plainClone`(JSON 왕복)으로 구조화 복제 안전 보장. 덱 편성은 facade `toggleDeck`→`MENU_BRIDGE.toggleDeck`.
   - **깜빡임 차단**: 메뉴가 오버레이 DOM이 아니므로 `.hgmenu-back`이 없어 hotzone `force`가 **끝까지 false** → `forceInteractive`가 안 뒤집히고 `applyLayer()`/`pushToTop`/`pushToBottom`이 **호출되지 않음**(실측 확인). 브리지의 `setFocusable`/`setShapeRect`는 no-op.
-  - **작업표시줄 z-order 복구 축소**: `scheduleTopReassert`에 `topReassertAllowed()` = `!desktopMode && !forceInteractive && !menuWinOpen()` 게이트 추가(예약 시점 + 타이머 발화 시점 모두 재확인). pushToTop이 전체화면 투명 오버레이를 재합성해 깜빡임을 유발하므로 **메뉴·모달이 하나라도 열려 있으면 수행하지 않는다**.
+  - **작업표시줄 z-order 복구 축소**: `scheduleTopReassert`에 `topReassertAllowed()` 게이트 추가. → **2026-07-31 실측 후 이 함수 자체를 제거**했다(아래 항목 참고).
   - **재렌더 가드**(§7 innerHTML 함정): 액션마다 스냅샷이 오므로 `HGMenu.refresh()`가 잦아짐 → **뽑기 연출 중·단축키 캡처 대기 중·입력칸 포커스 중**엔 재렌더를 건너뛴다. 창 재사용 시 `menu-close`로 DOM을 먼저 헐어 `open()` 토글 함정 방지(에코 루프는 `shutting` 플래그로 차단).
   - **검증**(실제 앱 CDP 구동): 8개 카테고리 22개 패널 전부 렌더·에러 0, 액션 라우팅(setHat·setWeaponSlot·toggleDeck·setFps·togglePeersDim·kickUser·togglePeerLock·setDevCoinMode·setDevBeam) 정상, invoke(rollGacha) Promise 왕복 + 연출 유지, **오버레이 실제 상태 변경 확인**(localStorage hat/fps), 스냅샷 왕복 반영, `menuMove`로 창이 캐릭터 추종, **desktopMode ON에서도 메뉴 창 정상 표시**, ✕/토글/재오픈 정상, force 기록 전 구간 `[]`.
-- ⬜ **남은 것**: 옵션 **캐릭터/UI 크기 조절**(§14) — `SCALE`(const 0.62)·`cellPxW/H`·드래그스냅 앵커·hotzone·배틀 배치까지 광범위 참조 → 런타임 가변화는 회귀 위험 큼. **인앱 시각 반복 검증 필요한 별도 단계**로 유보(오버레이는 자동 스크린샷 불가).
-- ⬜ **런타임 검증 필요**: F2 하단바 숨김, 조합키 완전 커스텀, 꾸미기 그리드·드래그추종·바깥클릭닫기(인앱).
+- ✅ **z-order 재삽입 실측 기반 재설계**(2026-07-31): `scheduleTopReassert`(작업표시줄 클릭 시 topmost 재삽입)를 **제거**하고, 실제로 필요한 지점인 **모니터 전환**으로 옮겼다. `pushToTop`은 PowerShell `SetWindowPos` → **Electron 네이티브 `setAlwaysOnTop(false→true 'screen-saver')`** 로 교체(프로세스 spawn 제거).
+  - **측정 방법**: 최상위 밴드를 100ms 간격 샘플링(변화 시에만 로깅), 오버레이/`Shell_TrayWnd`의 topmost 여부와 z-order 순위를 비교.
+  - **① 작업표시줄 클릭은 문제를 일으키지 않았다** — 40초간 실제 클릭(빈공간·앱 아이콘·탐색기·다이얼로그·앱 전환) 동안 오버레이는 topmost를 한 번도 잃지 않았고(계속 True), 순위도 계속 2위였다. 이 환경의 `Shell_TrayWnd`는 애초에 **topmost가 아니다**(전체 순위 33위) → "작업표시줄이 자체 topmost라 우리 위로 재삽입된다"는 기존 주석의 전제가 틀렸다.
+  - **② 실제로 가려지는 건 모니터 전환이었다** — 전환 직후 옮겨간 쪽 `Shell_TrayWnd`가 topmost로 승격하며 오버레이 위로 올라오고, **그 상태가 계속 유지**된다(A/B 대조군에서 14초 내내 BAD 고정).
+  - **③ 네이티브 경로로 충분** — 수정본에서 전환 2회(왕복) 모두 오버레이가 시종일관 작업표시줄 위 유지. PowerShell 불필요.
+  - 결론: 기존 코드는 **문제를 안 만드는 트리거에 걸려 깜빡임만 유발**하고 **진짜 트리거는 놓치고** 있었다. `pushToBottom`(HWND_BOTTOM)은 네이티브 대응이 없어 PowerShell 유지.
+  - ⚠️ 작업표시줄 **자동 숨김** 설정에선 `Shell_TrayWnd`가 상시 topmost라 양상이 다를 수 있다 — 재보고 시 이 지점부터 볼 것.
+- ✅ **확률(%) 팝업 고정 크기 + 스크롤**(2026-07-31, 사용자 요청): 항목이 늘면 카드가 계속 커지던 것 → **카드 크기 고정, 넘치는 만큼만 본문 스크롤**. 원인은 `.hgm-obody`가 flex 자식 기본값 `min-height:auto`라 내용보다 작아지지 못해 `overflow:auto`가 발동하지 못한 것 → `flex:1 1 auto; min-height:0`으로 해결하고 카드는 `height:calc(100% - 28px); max-height:420px`. 실측: 항목 62개(외형)·26개(무기) 모두 카드 424px 동일, 창(556) 안에 완전히 들어가고 본문 1729px가 372px 안에서 스크롤(1357px 이동 확인).
 
 ## 개발 시 주의(불변식 유지)
 - 멀티 일관성/오버레이 규칙 등 기존 불변식 유지. 새 릴레이 메시지 추가 시 server.js 화이트리스트 등록.
